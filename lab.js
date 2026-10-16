@@ -19,7 +19,7 @@
   // 25 Гс — значение Барнарда — грело спокойную поверхность сильнее ковра), полюса мельче — 0,015 R (пик поля площадок ≈ 450 Гс; прежде 0,025 R (у M-карликов 0,06: на Солнце поле расплывалось до 33 Гс,
   // в активной области 100–300 Гс), ковёр — 10 Гс беззнакового поля (среднее спокойного Солнца по HMI ≈ 10 Гс; доля концентраций спокойной поверхности < 1 %; 500 Гс — 17 %: спокойная
   // поверхность грелась почти как активная область)
-  const PRESETS = [['Солнце', 'G2V', 1, 1, { labLH: 2e28, poleDepth: 0.015, labCarpetG: 10, dipoleG: 7, pairQLo: 0.5, pairQHi: 10, fluxSlope: 2, labProtD: 25.38, labDOm: 0.0418, labVmer: 15, labPlageF: 0.3, labPlageD: 0.02, labXNu: 1 }], ['Барнард', 'M4V', 0.187, 0.162, { dipoleG: 25, labUBVRI: [12.497, 11.24, 9.511, 8.298, 6.741], labProtD: 145 }], ['Проксима', 'M5.5Ve', 0.154, 0.122, { dipoleG: 135, dipoleTilt: 51, labUBVRI: [14.21, 12.95, 11.13, 9.45, 7.41], labTeff: 3050, labProtD: 83.1 }], ['ε Индейца', 'K5V', 0.71, 0.76],
+  const PRESETS = [['Солнце', 'G2V', 1, 1, { labLH: 2e28, poleDepth: 0.015, labCarpetG: 10, dipoleG: 7, pairQLo: 0.5, pairQHi: 10, fluxSlope: 2, labProtD: 25.38, labDOm: 0.0418, labVmer: 15, labPlageF: 0.3, labPlageD: 0.02, labXNu: 1, cycle: 60 }], ['Барнард', 'M4V', 0.187, 0.162, { dipoleG: 25, labUBVRI: [12.497, 11.24, 9.511, 8.298, 6.741], labProtD: 145 }], ['Проксима', 'M5.5Ve', 0.154, 0.122, { dipoleG: 135, dipoleTilt: 51, labUBVRI: [14.21, 12.95, 11.13, 9.45, 7.41], labTeff: 3050, labProtD: 83.1 }], ['ε Индейца', 'K5V', 0.71, 0.76],
     ['Лакайль 9352', 'M1V', 0.474, 0.479], ['Росс 128', 'M4V', 0.198, 0.176], ['Gl 338', 'M0V'], ['Сириус', 'A1V', 1.71, 2.06], ['Арктур', 'K1.5III', 25.4, 1.08],
     ['Бетельгейзе', 'M2Iab', 760, 17], ['Ригель', 'B8Ia', 79, 21], ['Белый карлик', 'DA2']];
   // ползунки: [ключ, подпись, мин, макс, шаг]
@@ -58,7 +58,7 @@
       ['spreadKm2s', 'расплывание распадающихся областей, км²/с (Солнце 250–600; 0 — нет)', 0, 1000, 10], ['spreadDMax', 'расплывание: предел глубины источника, R★', 0.1, 0.8, 0.01], ['birthH', 'новая пара — раз в, ч', 2, 1000, 1],
       ['clusterFrac', 'рождения рядом с полюсами — доля', 0, 1, 0.01], ['polesTarget', 'полюсов держать', 2, 64, 2], ['fluxSlope', 'рождения пар — наклон N(Φ) ∝ Φ^−s', 1.2, 3.5, 0.05], ['spotBs', 'поле тени пятна, Гс (площадь = Φ/B)', 1500, 6000, 100], ['pairQLo', 'поток пар — мин., |q| (Солнце 0,5)', 0.01, 1, 0.01], ['pairQHi', 'поток пар — макс., |q| (Солнце 10)', 0.3, 12, 0.05], ['latBias', 'перевес к экватору (0 — равномерно)', 0, 6, 0.1], ['cancRate', 'уничтожение потока, доля в час', 0, 0.05, 0.0005],
       ['heatC', 'нагрев от уничтожения, эрг/(см³·с)', 0, 0.3, 0.005], ['heatE', 'нагрев от всплытия, эрг/(см³·с)', 0, 0.1, 0.001], ['birthBright', 'яркость рождения (точки, факел)', 0, 4, 0.05]]],
-    ['Вспышка и выброс', [['cycle', 'цикл, с', 6, 40, 0.5], ['flashDecay', 'спад вспышки, с', 0.3, 5, 0.05], ['ribbons', 'ленты — яркость', 0, 6, 0.05],
+    ['Вспышка и выброс', [['cycle', 'цикл события, с показа (Солнце 60 ≈ 3 ч; поверхность на время события стоит)', 6, 120, 0.5], ['flashDecay', 'спад вспышки, с', 0.3, 5, 0.05], ['ribbons', 'ленты — яркость', 0, 6, 0.05],
       ['dipoleG', 'диполь звезды, Гс (запирает выброс)', 0, 1000, 5], ['dipoleTilt', 'диполь — наклон к оси вращения, °', 0, 90, 1], ['ncr', 'срыв: порог показателя спада', 0.5, 3, 0.05], ['ropeDrive', 'разгон жгута, в g', 0, 10, 0.1],
       ['slowKms', 'медленный подъём, км/с', 1, 150, 1], ['cmeEscape', 'уходящий выброс (сценарий): 0 — нет, 1 — да', 0, 1, 1], ['dimming', 'потемнение после выброса', 0, 0.8, 0.01],
       ['ropeW', 'жгут — раздув', 0, 10, 0.1], ['ropeH', 'трубки: петля — подъём, R★', 0.1, 3, 0.01], ['frontR', 'трубки: фронт — радиус, R★', 0.1, 3, 0.01],
@@ -157,6 +157,8 @@
   if ((st.hou | 0) < 65) { st.star.labFanF = 0.5; st.hou = 65; }   // веера петель активных областей
   // автор: «было без вееров лучше — и текстура поверхности контраст потеряла — и прямо огромные области засветки»: веера выключены, сеть резче
   if ((st.hou | 0) < 66) { st.star.labFanF = 0; st.star.labCarpBlur = 0.17; st.hou = 66; }
+  // событие Солнца — 60 с показа ≈ 3 ч (аркада остывает до 1 МК за ≈ 45 мин, затемнение — часы)
+  if ((st.hou | 0) < 67) { if (st.name === 'Солнце') st.star.cycle = 60; st.hou = 67; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
       const cL = corona.carpet ? corona.carpet().L : 0.03;
@@ -433,7 +435,9 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     // терялись бы физические часы (разбор Codex: 5 FPS — половина времени); перерыв дольше секунды (скрытая вкладка) — пауза
     const dtW = (now - last) / 1000; last = now; const dtPh = dtW > 1 ? 0 : dtW, dt = Math.min(0.1, dtPh);
     const cyc = st.mode === 'sn' ? effSn().snCycle : effStar().cycle;
-    if (playing) { t = (t + dt * st.speed) % cyc; simT += dtPh * st.speed; $('scrub').value = t; }
+    // событие — вспышка или выброс (разбор Codex): поле на время события — снимок, поверхность стоит (звезда не поворачивается), идут часы события
+    const evOn = st.mode !== 'sn' && (st.flares || st.cme);
+    if (playing) { t = (t + dt * st.speed) % cyc; if (!evOn) simT += dtPh * st.speed; $('scrub').value = t; }
     $('scrubO').textContent = t.toFixed(1); $('scrub').max = cyc;
     const px = view.clientHeight / (2 * Math.tan(cam.fov * Math.PI / 360));
     // камера — до обновления звезды (уровень детализации берёт её положение)
@@ -442,9 +446,11 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
       cam.lookAt(orbit.T); cam.updateMatrixWorld(); }
     const tu0 = performance.now();
     const f = star.update(st.mode === 'sn' ? 99 : t, simT, px, 1, 1, { cam: star.group.worldToLocal(cam.position.clone()), realDt: dt });
+    const ev = corona && corona.setEvent ? corona.setEvent(evOn && star.poles.length >= 2 ? { t, cyc, tDyn: effStar().tDyn, flare: !!st.flares, cme: !!st.cme, P0: star.poles[0].p, P1: star.poles[1].p, rope: star.rope } : null) : null;
     cpu.update = cpu.update * 0.9 + (performance.now() - tu0) * 0.1; cpu.frame = cpu.frame * 0.95 + dtW * 1000 * 0.05;   // камера — в системе звезды (вращение)   // камера — в системе звезды (группа в начале координат); реальное время кадра — для детализации на паузе
     if (now - lastStats > 1000) { lastStats = now; stats(); }
     let ph = f.flash > 0.02 ? 'вспышка' : t < 9 && star.show.cme ? 'выброс' : 'спокойно';
+    if (ev) ph = (st.flares && st.cme ? 'вспышка и выброс' : st.flares ? 'вспышка' : 'выброс') + ` · ${Math.floor(ev.tau / 60)} мин после начала (поверхность стоит)`;
     if (sn) { const s = sn.update(t, px, 1); star.group.scale.setScalar(Math.max(1e-4, s.starScale)); star.group.visible = s.starScale > 0.002; star.setLook({ bright: effStar().bright * s.boost });
       ph = t < effSn().collapseAt ? 'перед коллапсом' : t < effSn().collapseAt + 3 ? 'коллапс, ударная волна' : 'расширение выброса'; }
     else { star.group.scale.setScalar(1); star.group.visible = true; }

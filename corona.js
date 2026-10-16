@@ -52,6 +52,30 @@
     // наоборот. Доли — подгонка по снимку SDO
     float warmWb(float bA, float bB, float Lcm) { float bx = max(bA, bB), bn = min(bA, bB), sA = smoothstep(0.8 * uBpl, 2.4 * uBpl, bx), sB = smoothstep(0.6 * uBpl, 1.8 * uBpl, bn), sL = smoothstep(uFanL0, uFanL1, Lcm);
       return uFanF * sA * (1.0 - sB) * sL + uCoreF * sA * sB; }
+    // событие — вспышка и выброс (автор: «вспышка (выброс)»; замысел — разбор Codex): часы события — физические секунды uEvTau; координаты
+    // точки поверхности q у линии раздела полярностей якорной пары: s — поперёк (asin(q·ax), R★), u — вдоль (atan2(q·side, q·m), R★)
+    uniform float uEvOn, uEvTau, uEvU, uEvSepCm; uniform vec3 uEvM, uEvAx, uEvSide; uniform vec4 uArc; uniform vec2 uArcTN; uniform vec3 uDim;
+    vec2 evSU(vec3 q) { q = normalize(q); return vec2(asin(clamp(dot(q, uEvAx), -1.0, 1.0)), atan(dot(q, uEvSide), dot(q, uEvM))); }
+    // затемнение после выброса: корона над областью уходит с выбросом — яркость фона × (1 − D) в конусе вокруг середины области
+    float evDim(vec3 x) { if (uEvOn < 0.5 || uDim.x <= 0.0) return 1.0; float th = acos(clamp(dot(normalize(x), uEvM), -1.0, 1.0)); return 1.0 - uDim.x * exp(-(th * th) / (uDim.y * uDim.y)); }
+    // лента: расстояние от линии раздела d(t) = d₀ + v₀τ₀(1 − e^(−t/τ₀)) (конечная скорость, с замедлением); время, когда лента дошла до D
+    float evD(float t) { return uArc.x + uArc.y * uArc.z * (1.0 - exp(-max(t, 0.0) / uArc.z)); }
+    float evTr(float D) { if (D <= uArc.x) return 0.0; float y = (D - uArc.x) / (uArc.y * uArc.z); return y >= 1.0 ? 1e30 : -uArc.z * log(1.0 - y); }
+    // аркада после вспышки: петля, оба основания которой лента уже прошла (по разные стороны линии раздела, в пределах области), — нагрета
+    // при пересоединении и остывает (Cargill et al. 1995, приближение из разбора Codex): теплопроводность с испарением T = T₀(1 + 7a/2τ_c0)^(−2/7),
+    // n = n₀T₀/T до равенства времён τ_c = τ_r, затем излучение со стеканием T = T*·x, n = n*·√x, x = 1 − (a − a*)/τ_r*; в 17,1 нм петля
+    // светит, проходя ≈ 0,9 МК (минуты), — аркаду держат петли, пересоединённые позже. Доля нитей uArc.w (редкие нити, мех — вдоль линий)
+    float arcade(vec3 a, vec3 b, float Lcm, float r) {
+      vec2 A = evSU(a), B = evSU(b); if (A.x * B.x >= 0.0 || Lcm > 2.0 * uEvSepCm) return 0.0;
+      float wu = 1.0 - smoothstep(0.8 * uEvU, uEvU, max(abs(A.y), abs(B.y))); if (wu <= 0.0) return 0.0;
+      float D = max(abs(A.x), abs(B.x)); if (D > evD(uEvTau)) return 0.0; float age = uEvTau - evTr(D); if (age <= 0.0) return 0.0;
+      float T0 = uArcTN.x, n0 = uArcTN.y, tc0 = 4e-10 * n0 * Lcm * Lcm / pow(T0, 2.5);
+      float Ts = exp((log(4e-10) + 2.0 * log(n0 * T0) + 2.0 * log(Lcm) - log(3.45e3)) / 6.0), as = 0.0, ns = n0, T, n;   // T* — где τ_c = τ_r (логарифмы: иначе 10⁴⁴)
+      if (Ts >= T0) Ts = T0; else { as = tc0 / 3.5 * (pow(T0 / Ts, 3.5) - 1.0); ns = n0 * T0 / Ts; }
+      if (age < as) { T = T0 * pow(1.0 + 3.5 * age / tc0, -2.0 / 7.0); n = n0 * T0 / T; }
+      else { float x = 1.0 - (age - as) / (3.45e3 * pow(Ts, 1.5) / ns); if (x * Ts <= 3e5) return 0.0; T = Ts * x; n = ns * sqrt(x); }
+      float aa = MU * MP * uGM / (KB * T * uRcm) * (1.0 - 1.0 / r), n9 = n * exp(-aa) / 1e9;
+      return uArc.w * wu * n9 * n9 * resp174(T); }
     float warmW(vec3 a, vec3 b, float Lcm) { return warmWb(max(fh4(a).b, 0.0) * uBconcH, max(fh4(b).b, 0.0) * uBconcH, Lcm); }
     vec4 fh4UV(vec2 t) { float x = fract(t.x) * float(uFHW) - 0.5, y = t.y * float(uFHH) - 0.5; int i = int(floor(x)), j = int(floor(y)); float fx = x - floor(x), fy = y - floor(y);
       return mix(mix(fh4At(i, j), fh4At(i + 1, j), fx), mix(fh4At(i, j + 1), fh4At(i + 1, j + 1), fx), fy); }`;
@@ -119,9 +143,10 @@
     uniform highp sampler3D uGeo;
     void main() {
       ivec2 ij = ivec2(floor(gl_FragCoord.xy)); float r = uRmin * exp(log(uRmax / uRmin) * (uLayer + 0.5) / uNr);
-      vec4 g = texelFetch(uGeo, ivec3(ij, int(uLayer)), 0); float T = 0.0, pb = 0.0, ww = 0.0; vec3 foot = vec3(0.0);
+      vec4 g = texelFetch(uGeo, ivec3(ij, int(uLayer)), 0); float T = 0.0, pb = 0.0, ww = 0.0, ea = 0.0; vec3 foot = vec3(0.0);
       if (g.a == 1.0) {   // замкнутая: петля RTV, нагрев — среднее по основаниям; метка — основание с B_r > 0
         vec3 a = octUnpack(g.r), b = octUnpack(g.g); foot = a; float F = 0.5 * (fh(a) + fh(b)), L = g.b * uRcm; ww = warmW(a, b, 2.0 * L);
+        if (uEvOn > 0.5 && uArc.w > 0.0) ea = arcade(a, b, L, r);   // аркада вспышки (не затемняется выбросом)
         if (F > 0.0 && L > 0.0) { float Q = F / L; pb = pow(Q / 9.8e4, 6.0 / 7.0) * pow(L, 5.0 / 7.0); T = clamp(1400.0 * pow(pb * L, 1.0 / 3.0), 3e5, 2e7); }
       } else if (g.a == 2.0) { T = uTopen; pb = uNopen * KB * T * 2.3 / 1.2; foot = 0.5 * octUnpack(g.r); }   // открытая: длина метки ½ — признак
       float eps = 0.0;
@@ -131,6 +156,8 @@
         // прежняя тёплая доля (uWarmV у горячих петель, плавно от 1,6 до 2,6 МК) и веера по ползунку
         if (g.a == 1.0 && T > uTWarmV) { float wt = ww + uWarmV * smoothstep(1.6e6, 2.6e6, T); if (wt > 0.0) { float aw = MU * MP * uGM / (KB * uTWarmV * uRcm) * (1.0 - 1.0 / r), nw = (1.2 / 2.3) * pb * exp(-aw) / (KB * uTWarmV) / 1e9;
           eps += wt * nw * nw * resp174(uTWarmV); } } }
+      if (uEvOn > 0.5) { float phV = 2.0 * PI * (float(ij.x) + 0.5) / uNp, thV = PI * (float(ij.y) + 0.5) / uNt;   // направление ячейки — как в uvw()
+        eps = eps * evDim(vec3(sin(thV) * cos(phV), cos(thV), sin(thV) * sin(phV))) + ea; }   // затемнение фона после выброса; аркада — поверх
       // R — свечение 17,4 нм; GBA — основание силовой линии (единичный вектор — замкнутая, длина ½ — открытая, 0 — нет основания)
       o0 = vec4(eps, foot);
     }`;
@@ -509,6 +536,18 @@
     // подгонка по профилю края SDO: с одной плотной частью край ярче середины диска в 13 раз, на снимке — в ≈ 3. uChCut — высота, выше которой
     // касательный столб обоих поглотителей меньше 10⁻⁶ (отсечка по самой толщине, не по числу шкал высот)
     uniform vec2 uChH, uChT0; uniform float uChCut, uTone, uIs;
+    uniform float uEvOn, uEvU, uPixA; uniform vec3 uEvM, uEvAx, uEvSide, uDim; uniform vec4 uRib, uCme; uniform vec2 uCmeRho;
+    vec2 evSU(vec3 q) { q = normalize(q); return vec2(asin(clamp(dot(q, uEvAx), -1.0, 1.0)), atan(dot(q, uEvSide), dot(q, uEvM))); }
+    float evDim(vec3 x) { if (uEvOn < 0.5 || uDim.x <= 0.0) return 1.0; float th = acos(clamp(dot(normalize(x), uEvM), -1.0, 1.0)); return 1.0 - uDim.x * exp(-(th * th) / (uDim.y * uDim.y)); }
+    // ленты вспышки: переходный слой у оснований петель, которые греет вспышка (феноменологически: яркость в пике — uRib.z, в долях белого
+    // втрое выше — узкое ядро засвечено, как на снимках AIA); ширина — не уже пикселя на поверхности, яркость по ширине сохраняется
+    uniform sampler2D uFH; uniform int uFHW, uFHH; uniform float uBconcH;
+    vec4 fhAt4(int i, int j) { return texelFetch(uFH, ivec2((i % uFHW + uFHW) % uFHW, clamp(j, 0, uFHH - 1)), 0); }
+    float fieldB(vec2 t) { float x = fract(t.x) * float(uFHW) - 0.5, y = t.y * float(uFHH) - 0.5; int i = int(floor(x)), j = int(floor(y)); float fx = x - floor(x), fy = y - floor(y);
+      return max(mix(mix(fhAt4(i, j).b, fhAt4(i + 1, j).b, fx), mix(fhAt4(i, j + 1).b, fhAt4(i + 1, j + 1).b, fx), fy), 0.0) * uBconcH; }
+    float ribbon(vec3 q, float wpx) { vec2 su = evSU(q); float w = max(uRib.y, wpx), ds = (abs(su.x) - uRib.x) / w, k = exp(-0.5 * ds * ds) * (1.0 - smoothstep(0.8 * uEvU, uEvU, abs(su.y)));
+      if (k < 1e-3) return 0.0; vec3 qn = normalize(q); vec2 uv = vec2(fract(atan(qn.z, qn.x) / (2.0 * PI) + 1.0), acos(clamp(qn.y, -1.0, 1.0)) / PI); float g = smoothstep(20.0, 80.0, fieldB(uv)), nn = pow(max(texture(uNet2, uv).r * uNetK2, 0.0), 0.7);
+      return uRib.z * (uRib.y / w) * k * g * nn; }
     float erfcx(float y) { return 2.0 / (1.7724539 * (y + sqrt(y * y + 1.2732395))); }   // точна при 0 и на бесконечности, при 1 — +5 %
     float chUp1(float r, float mu, float H, float t0) { float X = r / H; return t0 > 0.0 ? t0 * exp(-(r - 1.0) / H) * sqrt(0.5 * PI * X) * erfcx(mu * sqrt(0.5 * X)) : 0.0; }
     float chUp(float r, float mu) { return chUp1(r, mu, uChH.x, uChT0.x) + chUp1(r, mu, uChH.y, uChT0.y); }
@@ -531,8 +570,19 @@
         if (comp == 1 && uExtNet > 0.0 && r < uRmax) { vec3 q3 = uvw(x); vec4 vv = texture(uVol, q3); float lf = length(vv.gba), m1 = lf > 0.2 ? texture(uNet2, surfUV(vv.gba / lf)).r * uNetK2 : 1.0, m = m1;
           if (uMix > 0.0) { vec4 v2 = texture(uVolB, q3); float l2 = length(v2.gba); m = mix(m1, l2 > 0.2 ? texture(uNet2, surfUV(v2.gba / l2)).r * uNetK2 : 1.0, uMix); }
           e *= mix(1.0, m, uExtNet); }
+        if (comp == 1) e *= evDim(x);
         acc += e * exp(-h / max(H, 1e-5)) * chAtt(x, d); }
       return acc * dt; }
+    // выброс: пузырь над областью (центр — на высоте вершины жгута uCme.x, радиус uCme.y, толщина фронта uCme.w, яркость появления uCme.z):
+    // фронт плотнее фона в uCmeRho.x раз, полость — в uCmeRho.y (разбор Codex: волны и фронты в 17,1 нм — 1,1–1,3; полости — ≈ 0,7); к лучу —
+    // прибавка к уже собранному фону ((ρ² − 1)·фон), интегралом по отрезкам пересечения (фон — из объёма)
+    // пересечения луча с пузырём: x — вход во внешнюю сферу, y — во внутреннюю, z — выход из внутренней, w — из внешней (нет — пусто)
+    vec4 cmeTs(vec3 o, vec3 d) { vec3 C = uEvM * (1.0 + uCme.x), oc = o - C; float rb = uCme.y, ri = max(rb - uCme.w, 0.0), b = dot(oc, d), q2 = dot(oc, oc), h0 = b * b - (q2 - rb * rb);
+      if (h0 <= 0.0) return vec4(1e9); h0 = sqrt(h0); float t0 = -b - h0, t3 = -b + h0, h1 = b * b - (q2 - ri * ri); if (h1 <= 0.0) return vec4(t0, t3, t3, t3); h1 = sqrt(h1); return vec4(t0, -b - h1, -b + h1, t3); }
+    float ovl(float a0, float a1, float b0, float b1) { return max(0.0, min(a1, b1) - max(a0, b0)); }
+    // множитель шага луча [t, t + ds]: доля шага во фронте × (ρ_ф² − 1), в полости × (ρ_п² − 1) — поправка плотности ровно к тому фону, что собирает луч
+    float cmeF(vec4 T, float t, float ds) { if (T.x > 1e8) return 1.0; float sh = ovl(t, t + ds, T.x, T.y) + ovl(t, t + ds, T.z, T.w), cv = ovl(t, t + ds, T.y, T.z);
+      return 1.0 + uCme.z * ((uCmeRho.x * uCmeRho.x - 1.0) * sh + (uCmeRho.y * uCmeRho.y - 1.0) * cv) / max(ds, 1e-6); }
     float furM(float fr, vec3 foot, bool ok) { if (uGas > 0.5) return fr > 0.0 && ok ? mix(1.0, furW(foot), fr) : 1.0; return fr > 0.0 && ok ? fr * furW(foot) : 0.0; }
     void main() {
       // луч — из поля зрения камеры (без обращения проекции: при дальней плоскости в 10⁵ точности float не хватало)
@@ -550,9 +600,9 @@
       // в ярком нижнем слое); к краю — плавно
       float bimp = length(cross(o, d)), edg = smoothstep(0.985, 1.02, bimp), outer = 1.0 - smoothstep(1.3, 1.4, bimp), fwE = uFur * edg * outer, fwD = uFur * uFurDisk * (1.0 - edg) * outer, fw = fwE + fwD;   // полоса меха — до 1,3–1,4 R★; на диске — по яркости точки
       // нижний слой на диске — из текстуры (доля α по наклону: у края — объём целиком, без шва); при α = 1 объём ниже r_c не нужен
-      float mu = sqrt(max(0.0, 1.0 - bimp * bimp)), al = disk && uSurfOn > 0.5 ? (uGas > 0.5 ? smoothstep(uMuA, uMuB, mu) : 1.0) : 0.0;   // газ выключен — текстура до самого края (у края — J при μ = 0,25: столб над краем вдвое-втрое длиннее вертикали, порядок тот же)
+      float mu = sqrt(max(0.0, 1.0 - bimp * bimp)), al = disk && uSurfOn > 0.5 && (uEvOn < 0.5 || uGas < 0.5) ? (uGas > 0.5 ? smoothstep(uMuA, uMuB, mu) : 1.0) : 0.0;   // событие — объёмом, если газ включён (разбор Codex)   // газ выключен — текстура до самого края (у края — J при μ = 0,25: столб над краем вдвое-втрое длиннее вертикали, порядок тот же)
       vec2 tc; if (al > 0.999 && sphere(o, d, uRc, tc)) b = min(b, max(a, tc.x));
-      float I = 0.0, Il = 0.0, t = a, j = hash(gl_FragCoord.xy);
+      float I = 0.0, Il = 0.0, t = a, j = hash(gl_FragCoord.xy); vec4 cmT = uEvOn > 0.5 && uCme.z > 0.0 ? cmeTs(o, d) : vec4(1e9);
       // шаг: у поверхности мельче; у луча с мехом — ещё мельче (метка основания вдоль луча меняется быстро, иначе узор — зерно)
       // uGas 0 — газ (объём над диском и краем) не рисуется, мех — остаётся (автор: «газ только» выключить, «а мех оставь»): свечение газа видно
       // только через узор меха над кромкой (доля меха × множитель узора); лучи без меха объём не проходят
@@ -564,7 +614,7 @@
         { float lf = length(v.gba); e *= furM((fwE + fwD * furGate(e)) * rk, lf > 0.2 ? v.gba / lf : vec3(0.0), lf > 0.2); }
         // смена снимка поля: новый объём проявляется поверх прежнего (свечение смешивается, метки — каждая в своём объёме)
         if (uMix > 0.0) { vec4 v2 = texture(uVolB, q); float e2 = v2.r, l2 = length(v2.gba); e2 *= furM((fwE + fwD * furGate(e2)) * rk, l2 > 0.2 ? v2.gba / l2 : vec3(0.0), l2 > 0.2); e = mix(e, e2, uMix); }
-        e *= chAtt(ps, d);
+        e *= chAtt(ps, d) * cmeF(cmT, t, ds);
         if (length(ps) > uRc) I += e * ds; else Il += e * ds; t += ds; }
       // живая текстура и трубки — без поглощения хромосферой (выключены по умолчанию; разбор Codex: при поглощении их пути несогласованы)
       if (al > 0.0) { vec3 P = normalize(o + ts.x * d); vec2 uv = vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI);
@@ -581,6 +631,8 @@
       // ковёр, протяжённая корона и мох — интегралом вдоль луча (на диске — до поверхности: дальнюю сторону закрывает звезда)
       if (uCarpOn > 0.5) { vec2 tq; float tHit = sphere(o, d, 1.0, tq) && tq.x > 0.0 ? tq.x : -1.0, jt = hash(gl_FragCoord.xy + 17.0);
         I += layerCol(o, d, tHit, uCarpRs, 0, 16, jt) + layerCol(o, d, tHit, uExtRs, 1, 24, jt) + layerCol(o, d, tHit, uMossRs, 2, 12, jt); }
+      // 4. ленты: след пикселя поперёк ленты — с ракурсом (у края поверхность видна наискось — след длиннее)
+      if (uEvOn > 0.5 && uRib.z > 0.0 && disk) { vec3 qh = normalize(o + ts.x * d); I += ribbon(qh, ts.x * uPixA / max(dot(qh, -d), 0.1)) * chAtt(qh * (1.0 + uMossH), d); }
       if (uRaw > 0.5) { o0 = vec4(I, disk ? 1.0 : 0.0, 0.0, 1.0); return; }
       // тон (автор: «очень равномерная корона — посмотри на снимки»): как у снимков AIA 171 в стандартной обработке (aia_intscale) — √ яркости,
       // белое — 7,3 медианы середины диска: подгонка палитры — при нашей золотой палитре середина диска той же светлоты, что на снимке SDO
@@ -635,7 +687,10 @@
     const fhTex = new THREE.DataTexture(new Float32Array(128 * 64), 128, 64, THREE.RedFormat, THREE.FloatType);
     Object.assign(fhTex, { wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, flipY: false, generateMipmaps: false });
     const uC = []; for (let i = 0; i < NCMAX; i++) uC.push(new THREE.Vector4());   // зарядов до NCMAX (256): пятна и площадки областей с изображениями
-    const shU = { carp: { value: 500 }, bconc: { value: 3000 }, su: { value: 0.1 } };   // общие для карты нагрева и проходов с разбивкой нагрева
+    const shU = { carp: { value: 500 }, bconc: { value: 3000 }, su: { value: 0.1 } };
+    // событие (вспышка и выброс): общие объекты для запекания (аркада, затемнение) и луча (ленты, пузырь, затемнение)
+    const evU = { uEvOn: { value: 0 }, uEvTau: { value: 0 }, uEvU: { value: 0.1 }, uEvSepCm: { value: 1e10 }, uEvM: { value: new THREE.Vector3(0, 0, 1) }, uEvAx: { value: new THREE.Vector3(1, 0, 0) }, uEvSide: { value: new THREE.Vector3(0, 1, 0) },
+      uArc: { value: new THREE.Vector4(0, 0, 900, 0) }, uArcTN: { value: new THREE.Vector2(1e7, 1e10) }, uDim: { value: new THREE.Vector3(0, 0.2, 0) }, uRib: { value: new THREE.Vector4(0, 0.004, 0, 0) }, uCme: { value: new THREE.Vector4(0, 0, 0, 0) }, uCmeRho: { value: new THREE.Vector2(1.2, 0.7) }, uPixA: { value: 0.002 } };   // общие для карты нагрева и проходов с разбивкой нагрева
     const bu = { uFH: { value: fhTex }, uFHW: { value: 128 }, uFHH: { value: 64 }, uLayer: { value: 0 }, uNr: { value: o.Nr }, uNt: { value: o.Nt }, uNp: { value: o.Np }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uRcm: { value: R }, uGM: { value: G * M }, uTopen: { value: o.Topen }, uNopen: { value: o.nOpen }, uBmin: { value: 1e-3 }, uStepMode: { value: 1 },
       uC: { value: uC }, uNC: { value: 0 }, uDip: { value: 0 }, uDipU: { value: 0 }, uGU: { value: 1 }, uDipM: { value: new THREE.Vector3(0, 1, 0) } };
@@ -643,6 +698,7 @@
     // Прежняя подгонка вееров (для справки): длина веера — от 30–80 тыс. км; доля вееров 0,5 —
     // подгонка по снимку SDO в его разрешении на остановленном кадре: при 0,3 / 0,6 p95 диска 2,18 / 2,39 медианы (SDO 2,30), площадь ярче трёх
     // медиан 1,8 / 2,8 % (SDO ≈ 2,7 %); другой момент (другие области на диске) сдвигает эти числа в полтора раза; доля ядер — по ползунку нет, 0 (была 0,02 — подгонка)
+    Object.assign(bu, evU);
     Object.assign(bu, { uCarpG: shU.carp, uBconcH: shU.bconc, uSuH: shU.su, uBpl: { value: o.bPlage != null ? o.bPlage : 50 }, uFanF: { value: o.fanF != null ? o.fanF : 0 }, uCoreF: { value: o.coreF != null ? o.coreF : 0 }, uWarmV: { value: o.warmV != null ? o.warmV : 0.1 },
       uFanL0: { value: 3e9 }, uFanL1: { value: 8e9 }, uTWarmV: { value: 1.1e6 } });
     bu.uSW = { value: o.surfW }; bu.uSH = { value: o.surfH }; bu.uRc = { value: 1 + o.shell };
@@ -690,6 +746,8 @@
       uRc: { value: 1 + o.shell }, uMuA: { value: o.muA }, uMuB: { value: o.muB }, uSurfOn: { value: o.surf }, uCamRot: { value: new THREE.Matrix3() }, uCam: { value: new THREE.Vector3() }, uTanH: { value: 0.4 }, uAspect: { value: 1 }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uI0: { value: 1 }, uIw: { value: 100 }, uW: { value: 1 }, uRaw: { value: 0 }, uSteps: { value: 600 },
       uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
+    Object.assign(ru, evU);   // событие: ленты, пузырь выброса, затемнение
+    Object.assign(ru, { uFH: bu.uFH, uFHW: bu.uFHW, uFHH: bu.uFHH, uBconcH: bu.uBconcH });   // карта нагрева — поле под лентами
     const rayMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: RAY_FS, uniforms: ru, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
     const rq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), rayMat), rs = new THREE.Scene(); rq.frustumCulled = false; rs.add(rq);
@@ -946,6 +1004,7 @@
       if (ru.uFurSig.value !== furSigN) { furSigN = ru.uFurSig.value; ru.uFurNorm.value = furNorm(furSigN); }
       const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(), ac = renderer.autoClear;
       setCam(camera); ru.uW.value = w; renderer.autoClear = false;
+      { renderer.getDrawingBufferSize(dbs); const hp = target ? target.height : Math.max(1, dbs.y * rayScale); ru.uPixA.value = 2 * ru.uTanH.value / hp; }   // угол пикселя луча — ширина лент не меньше пикселя
       if (!target && rayScale < 1) {   // на экран — в половинную цель, затем растяжка с тем же смешиванием
         renderer.getDrawingBufferSize(dbs); const W = Math.max(1, Math.round(dbs.x * rayScale)), H = Math.max(1, Math.round(dbs.y * rayScale));
         if (!halfRT || halfRT.width !== W || halfRT.height !== H) { if (halfRT) halfRT.dispose();
@@ -1305,8 +1364,46 @@
       renderer.setRenderTarget(vols[iF], k, 0); renderer.getContext().readPixels(0, 0, o.Np, o.Nt, 0x1908, 0x1406, buf); renderer.setRenderTarget(prev, face, mip); return buf; }
     function dispose() { renderer.domElement.removeEventListener('webglcontextrestored', onRestore); carpTmp.dispose(); carpOut.dispose(); blurMat.dispose(); carpRT.dispose(); carpMat.dispose(); netRT.dispose(); netLo.dispose(); netMat.dispose(); if (sitesTex) sitesTex.dispose(); mossRT.dispose(); mossMat.dispose(); blackTex.dispose(); hyd.w.forEach(W => W.w && W.w.terminate()); hyd.w = []; hProfTex.dispose(); hTabTex.dispose(); [tLen, tGas, tLum, tPA, tPB].forEach(r => r.dispose()); tLumMat.dispose(); if (tubes.acc) tubes.acc.dispose(); tSeed.dispose(); [tLenMat, tPtMat, tGasMat, tRenMat].forEach(m => m.dispose()); tGeo.dispose(); base.dispose(); if (detail) detail.dispose(); JL.dispose(); geos.forEach(v => v.dispose()); emitMat.dispose(); if (halfRT) halfRT.dispose(); upMat.dispose(); uq.geometry.dispose(); gridRT.dispose(); gridMat.dispose(); heatRT.dispose(); if (heat2) heat2.dispose(); heatMat.dispose(); hquad.geometry.dispose(); vols.forEach(v => v.dispose()); fhTex.dispose(); bakeMat.dispose(); rayMat.dispose(); quad.geometry.dispose(); rq.geometry.dispose(); }
     // веера и ядра областей: доли тёплой составляющей (стенд, ползунки); яркость объёма — пересчитать на следующем кадре и на паузе
+    // событие — вспышка и выброс (стенд; автор: «вспышка (выброс)»; замысел — разбор Codex). Часы события — физические секунды: α = (R★/v_уб)/tDyn
+    // секунд на секунду показа (тот же масштаб, что у пути жгута в модели звезды; у Солнца ≈ 188); поле на время события — снимок (стенд
+    // держит поверхность). e: { t — секунды цикла, cyc, tDyn, flare, cme, P0, P1 — якорная пара (единичные векторы в системе звезды), rope }
+    let evWas = false, evKey = '';
+    const sm01 = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+    function setEvent(e) {
+      const U = evU;
+      if (!e || !(e.flare || e.cme) || !e.P0 || !e.P1) { if (evWas) { U.uEvOn.value = 0; U.uRib.value.z = 0; U.uCme.value.z = 0; U.uDim.value.x = 0; U.uArc.value.w = 0; heatDirty = true; briVer++; evWas = false; evKey = ''; } return null; }
+      const alpha = (R / Math.sqrt(2 * G * M / R)) / (e.tDyn || 6), tau = e.t * alpha, cyc = e.cyc || 60, fade = 1 - sm01((e.t / cyc - 0.9) / 0.1);   // конец цикла — плавно
+      const P0 = e.P0.clone().normalize(), P1 = e.P1.clone().normalize(), m = P0.clone().add(P1).normalize(), ax = P0.clone().sub(P1).normalize(), side = m.clone().cross(ax).normalize(), sep = P0.distanceTo(P1);
+      U.uEvOn.value = 1; U.uEvTau.value = tau; U.uEvM.value.copy(m); U.uEvAx.value.copy(ax); U.uEvSide.value.copy(side); U.uEvU.value = 0.6 * sep; U.uEvSepCm.value = sep * R;
+      // ленты: каждая уходит от линии раздела на d(t) = d₀ + v₀τ₀(1 − e^(−t/τ₀)), τ₀ = 20 мин. В нашем поле (заряды под поверхностью) поток выходит
+      // у самих полюсов, у линии раздела его почти нет: петли через линию раздела опираются на площадки полюсов (основания в 0,7–1,25 полуразноса
+      // от линии). Поэтому лента проходит площадку — от 0,4 до 1,1 полуразноса пары (у этой области ≈ 33 км/с вначале; разбор Codex: 8–33 км/с,
+      // до ≈ 65 у сильных — Hinterreiter et al. 2018); ширина 1,5 тыс. км (на экране — не уже пикселя); яркость — по полю под лентой и узору
+      // сети (рваная лента с узлами), в пике втрое выше белого (узкие ядра засвечены, как на снимках AIA), нарастает за 2 мин, гаснет за ≈ 20 мин
+      const t0 = 1200, d0 = 0.4 * 0.5 * sep, v0 = 0.7 * 0.5 * sep / t0;
+      const ribEnv = e.flare ? sm01(tau / 120) * Math.exp(-tau / 1200) * fade : 0, dNow = d0 + v0 * t0 * (1 - Math.exp(-tau / t0));
+      U.uRib.value.set(dNow, 1.5e8 / R, 3 * (S.Is || 1) * ribEnv, 0);
+      // аркада: петли, пересоединённые лентой (см. arcade в шейдере), T₀ = 10 МК, n₀ = 10¹⁰ см⁻³ (испарение: 0,5–3·10¹⁰), доля нитей 0,1 — по виду
+      // (на 47-й минуте: 0,03 — +2 % света области, едва видно; 0,3 — +24 %, свет расползается по всей области)
+      U.uArc.value.set(d0, v0, t0, e.flare ? 0.1 * fade : 0);   // та же лента: петля пересоединена, когда лента прошла оба основания U.uArcTN.value.set(1e7, 1e10);
+      // выброс: вершина жгута h(t) — путь из модели звезды; пузырь — центр на высоте h, радиус 0,5h, фронт — 0,15 радиуса; появляется, когда
+      // жгут прошёл высоту срыва
+      // запертое извержение (разбор Codex): жгут остановился — вещество стекает (fall из пути жгута), пузырь и полость уходят, затемнение
+      // восстанавливается вместе с ним; порога срыва нет (жгут нигде не неустойчив) — пузыря нет
+      let h = 0, cmeEnv = 0, tE = -1, drain = 0; if (e.cme && e.rope && e.rope.H && (e.rope.hCr > 0 || e.rope.esc)) { h = e.rope.at(e.t); const hc = e.rope.hCr || 0.05;
+        drain = e.rope.esc ? 0 : (e.rope.fall ? e.rope.fall(e.t) : 0); cmeEnv = sm01((h - hc) / (0.5 * hc)) * (1 - drain) * fade;
+        for (let i = 0; i < e.rope.H.length; i++) if (e.rope.H[i] > hc) { tE = i * e.rope.dt; break; } }
+      U.uCme.value.set(h, 0.5 * h, cmeEnv, 0.075 * h);   // x — высота центра, y — радиус, z — яркость появления, w — толщина фронта U.uCmeRho.value.set(1.2, 0.7);
+      // затемнение: после срыва — за 10 мин до 60 % яркости фона (в среднем ≈ 60 % — Dissauer et al. 2018), восстановление ≈ 3 ч (ядро
+      // затемнения держится ≥ 10 ч, края — 1–2 ч: Vanninathan et al. 2018); конус вокруг середины области — 1,2 разноса пары (не меньше 0,12 рад)
+      let dim = 0; if (e.cme && tE >= 0) { const a = tau - tE * alpha; dim = a > 0 ? 0.6 * sm01(a / 600) * Math.exp(-Math.max(0, a - 600) / 10800) * (1 - drain) * fade : 0; }
+      U.uDim.value.set(dim, Math.max(0.12, 1.2 * sep), 1);
+      const key = [tau.toFixed(0), U.uArc.value.w.toFixed(4), dim.toFixed(4)].join('|'); if (key !== evKey) { evKey = key; heatDirty = true; }   // аркада и затемнение — в объёме: пересчёт при смене события (разбор Codex: на паузе — нет)
+      if (!evWas) { briVer++; heatDirty = true; } evWas = true;
+      return { tau, alpha, h, cmeEnv, ribEnv, dim, dNow: dNow * R / 1e8 };
+    }
     function setFans(v) { if (v && v.fanF != null) bu.uFanF.value = Math.max(0, +v.fanF); if (v && v.coreF != null) bu.uCoreF.value = Math.max(0, +v.coreF); heatDirty = true; briVer++; }   // разбор Codex: и яркость плиток текстуры (на паузе)
-    return { maxCharges: () => NCMAX, setFans, fans: () => ({ fanF: bu.uFanF.value, coreF: bu.uCoreF.value }), setTone: v => { ru.uTone.value = v ? 1 : 0; }, setChrom, chrom: () => Object.assign({}, chrom, { H_R: ru.uChH.value.toArray(), tau0: ru.uChT0.value.toArray() }), setTubes: v => { tubes.want = !!v; if (v) tubes.on = true; }, setTubeDim: k => { ru.uTK.value = Math.min(1, Math.max(0, +k || 0)); }, setCarpet, carpet: () => Object.assign({}, carp), readMoss: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(mossRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, readNet: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(netRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return { b, CW, CH }; }, readCarp: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(carpShown || carpRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, setHydro, hydroTick, hydroStatus, hydroFrozen: hydFrozen, setHydroRate: r => { hyd.rate = Math.max(1, Math.min(1000, +r || 30)); },
+    return { maxCharges: () => NCMAX, setEvent, setFans, fans: () => ({ fanF: bu.uFanF.value, coreF: bu.uCoreF.value }), setTone: v => { ru.uTone.value = v ? 1 : 0; }, setChrom, chrom: () => Object.assign({}, chrom, { H_R: ru.uChH.value.toArray(), tau0: ru.uChT0.value.toArray() }), setTubes: v => { tubes.want = !!v; if (v) tubes.on = true; }, setTubeDim: k => { ru.uTK.value = Math.min(1, Math.max(0, +k || 0)); }, setCarpet, carpet: () => Object.assign({}, carp), readMoss: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(mossRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, readNet: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(netRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return { b, CW, CH }; }, readCarp: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(carpShown || carpRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, setHydro, hydroTick, hydroStatus, hydroFrozen: hydFrozen, setHydroRate: r => { hyd.rate = Math.max(1, Math.min(1000, +r || 30)); },
       _tubes: () => ({ tru, tRenMat, tMesh, tScene, tGeo, camL, T, phiP, phiN, mixP, mixN, lamPole, lumBuf, lam0: () => lam0, omMax: omMaxLast, slotsFree: sFree.length }), setTubeFill: f => { tru.uFill.value = Math.min(1, Math.max(0.005, f)); },
       tubesDebug: () => { const prev = renderer.getRenderTarget(), gl = renderer.getContext(), pa = new Float32Array(TM * TN * 4); renderer.setRenderTarget(tPA); gl.readPixels(0, 0, TM, TN, 0x1908, 0x1406, pa);
         let acc = null; if (tubes.acc) { acc = new Float32Array(tubes.acc.width * tubes.acc.height * 4); renderer.setRenderTarget(tubes.acc); gl.readPixels(0, 0, tubes.acc.width, tubes.acc.height, 0x1908, 0x1406, acc); }
