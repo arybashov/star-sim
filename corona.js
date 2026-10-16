@@ -404,13 +404,16 @@
     // слой у поверхности (ковёр, протяжённая корона, мох): свечение e·exp(−h/H) с местными e, H точки поверхности под каждой точкой луча —
     // интегралом вдоль луча внутри сферы Rs (автор: «эти вот проекции пятен на текстуру — наверное не надо делать — свет так не распространяется
     // в газе»: прежде столб брался по одной точке под касательной — пятно у края «проецировалось» вверх тёмным столбом)
-    uniform float uCarpRs, uExtRs, uMossRs;
+    uniform float uCarpRs, uExtRs, uMossRs, uNetK2, uExtNet; uniform sampler2D uNet2;
     vec2 surfUV(vec3 P) { return vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI); }
     float layerCol(vec3 o, vec3 d, float tHit, float Rs, int comp, int NS, float jit) {
       vec2 ts; if (!sphere(o, d, Rs, ts)) return 0.0; float t0 = max(ts.x, 0.0), t1 = tHit > 0.0 ? min(ts.y, tHit) : ts.y; if (t1 <= t0) return 0.0;
       float dt = (t1 - t0) / float(NS), acc = 0.0;
       for (int k = 0; k < 32; k++) { if (k >= NS) break; vec3 x = o + (t0 + (float(k) + jit) * dt) * d; float r = length(x), h = r - 1.0; if (h < 0.0) continue; vec2 uv = surfUV(x / r);
         float e, H; if (comp == 2) { e = texture(uMoss, uv).r / uMossH; H = uMossH; } else { vec4 c = texture(uCarp, uv); e = comp == 0 ? c.x : c.z; H = comp == 0 ? c.y : c.w; }
+        // лучи (автор: «лучи в короне ещё меньше стали»): протяжённая корона светит вдоль силовых линий — свечение × узор сети у основания линии,
+        // проходящей через точку (метка основания — из объёма поля): линии от ярких узлов сети — светлые перья, средняя яркость та же
+        if (comp == 1 && uExtNet > 0.0 && r < uRmax) { vec4 vv = texture(uVol, uvw(x)); float lf = length(vv.gba); if (lf > 0.2) e *= mix(1.0, texture(uNet2, surfUV(vv.gba / lf)).r * uNetK2, uExtNet); }
         acc += e * exp(-h / max(H, 1e-5)); }
       return acc * dt; }
     float furM(float fr, vec3 foot, bool ok) { if (uGas > 0.5) return fr > 0.0 && ok ? mix(1.0, furW(foot), fr) : 1.0; return fr > 0.0 && ok ? fr * furW(foot) : 0.0; }
@@ -552,7 +555,7 @@
     const ru = { uVol: { value: vols[0].texture }, uVolB: { value: vols[1].texture }, uHist: { value: null }, uHistD: { value: null }, uDW: { value: null }, uDOn: { value: 0 }, uMix: { value: 0 },
       uRc: { value: 1 + o.shell }, uMuA: { value: o.muA }, uMuB: { value: o.muB }, uSurfOn: { value: o.surf }, uCamRot: { value: new THREE.Matrix3() }, uCam: { value: new THREE.Vector3() }, uTanH: { value: 0.4 }, uAspect: { value: 1 }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uI0: { value: 1 }, uIw: { value: 100 }, uW: { value: 1 }, uRaw: { value: 0 }, uSteps: { value: 600 },
-      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
+      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
     const rayMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: RAY_FS, uniforms: ru, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
     const rq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), rayMat), rs = new THREE.Scene(); rq.frustumCulled = false; rs.add(rq);
@@ -1132,7 +1135,7 @@
     const mossRT = new THREE.WebGLRenderTarget(512, 256, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false });
     const mossMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: MOSS_FS, uniforms: cu, depthTest: false, depthWrite: false });
     let netMade = false;
-    function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; } cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; pass(carpMat, carpRT); ru.uCarp.value = carpRT.texture;
+    function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; } cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; pass(carpMat, carpRT); ru.uCarp.value = carpRT.texture; ru.uNet2.value = netTex; ru.uNetK2.value = netK;
       ru.uCarpRs.value = 1 + 6 * carp.L / Math.PI; ru.uExtRs.value = 1 + 6 * 0.5 * KB * 2e6 * R / (MU * MP * G * M); ru.uMossRs.value = 1 + 6 * ru.uMossH.value;
       if (carp.moss) { pass(mossMat, mossRT); ru.uMoss.value = mossRT.texture; } else ru.uMoss.value = blackTex; }
     const blackTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat); blackTex.needsUpdate = true;
