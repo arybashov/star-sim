@@ -19,13 +19,44 @@
   // 25 Гс — значение Барнарда — грело спокойную поверхность сильнее ковра), полюса мельче — 0,015 R (пик поля площадок ≈ 450 Гс; прежде 0,025 R (у M-карликов 0,06: на Солнце поле расплывалось до 33 Гс,
   // в активной области 100–300 Гс), ковёр — 10 Гс беззнакового поля (среднее спокойного Солнца по HMI ≈ 10 Гс; доля концентраций спокойной поверхности < 1 %; 500 Гс — 17 %: спокойная
   // поверхность грелась почти как активная область)
-  const PRESETS = [['Солнце', 'G2V', 1, 1, { labLH: 2e28, poleDepth: 0.015, labCarpetG: 10, dipoleG: 7, pairQLo: 0.5, pairQHi: 10, fluxSlope: 2, labProtD: 25.38, labDOm: 0.0418, labVmer: 15, labPlageF: 0.3, labPlageD: 0.02, labXNu: 1, cycle: 60, cmeEscape: 1 }], ['Барнард', 'M4V', 0.187, 0.162, { dipoleG: 25, labUBVRI: [12.497, 11.24, 9.511, 8.298, 6.741], labProtD: 145 }], ['Проксима', 'M5.5Ve', 0.154, 0.122, { dipoleG: 135, dipoleTilt: 51, labUBVRI: [14.21, 12.95, 11.13, 9.45, 7.41], labTeff: 3050, labProtD: 83.1 }], ['ε Индейца', 'K5V', 0.71, 0.76],
+  const PRESETS = [['Солнце', 'G2V', 1, 1, { labLH: 2e28, poleDepth: 0.015, labCarpetG: 10, dipoleG: 7, pairQLo: 0.5, pairQHi: 10, fluxSlope: 2, labProtD: 25.38, labDOm: 0.0418, labVmer: 15, labPlageF: 0.3, labPlageD: 0.02, labXNu: 1, cycle: 60, cmeEscape: 1 }], ['Барнард', 'M4V', 0.187, 0.162, { dipoleG: 25, labUBVRI: [12.497, 11.24, 9.511, 8.298, 6.741], labProtD: 145 }], ['Проксима', 'M5.5Ve', 0.154, 0.122, { dipoleG: 135, dipoleTilt: 51, labUBVRI: [14.21, 12.95, 11.13, 9.45, 7.41], labTeff: 3050, labProtD: 89.8 }], ['ε Индейца', 'K5V', 0.71, 0.76],
     ['Лакайль 9352', 'M1V', 0.474, 0.479], ['Росс 128', 'M4V', 0.198, 0.176], ['Gl 338', 'M0V'], ['Сириус', 'A1V', 1.71, 2.06], ['Арктур', 'K1.5III', 25.4, 1.08],
     ['Бетельгейзе', 'M2Iab', 760, 17], ['Ригель', 'B8Ia', 79, 21], ['Белый карлик', 'DA2']];
+  // ---- перенос с Солнца на другие звёзды (автор: «надо к остальным звёздам всё подключать»; замысел — разбор Codex 16.10.2026). Корона,
+  // области, вспышка и выброс подобраны на Солнце; у остальных — правила от рентгена звезды. Данные пресетов (рентген — ROSAT 0,1–2,4 кэВ,
+  // Schmitt & Liefke 2004; поле — ZDI и Зееман): LX — спокойный рентген, эрг/с; dip — диполь, Гс (tilt — наклон, °); P — период, сут.
+  // «проба» и «допущение» — не измерения
+  const STAR_DATA = [
+    [/^Солнце$/, { sp: /^G2/, LX: 2e27, src: 'за цикл 2,3·10²⁶–4,4·10²⁷ (Peres et al. 2000); взято ближе к максимуму' }],
+    [/^Барнард|^Barnard's Star$/, { sp: /^M4/, LX: 5e25, src: 'ROSAT lg 25,6–25,85 (Schmitt & Liefke 2004; Chandra 0,3–10 кэВ — 25,3, France et al. 2020)', dip: 25, dipNote: 'проба (≈ 3·B_ℓ скв., Donati et al. 2023)', P: 145 }],
+    [/^Проксима|^Proxima Centauri$/, { sp: /^M5/, LX: 1.66e27, src: 'ROSAT lg 27,22 (в другом наблюдении 26,81; Schmitt & Liefke 2004)', dip: 135, tilt: 51, dipNote: 'ZDI (Klein et al. 2021)', P: 89.8 }],
+    [/^ε Индейца|Indi/, { sp: /^K5/, LX: 2.45e27, src: 'ROSAT lg 27,39 (Schmitt & Liefke 2004)', dip: 10, dipNote: 'допущение — нет измерений', P: 35.5 }],
+    [/^Лакайль 9352|^Lacaille 9352/, { sp: /^M[01]/, LX: 1.07e27, src: 'ROSAT lg 27,03 (Schmitt & Liefke 2004)', dip: 20, dipNote: 'допущение — нет измерений', P: 38.7 }],
+    [/^Росс 128|^Ross 128/, { sp: /^M4/, LX: 5e26, src: 'ROSAT lg 26,63–26,80 (Schmitt & Liefke 2004)', dip: 35, dipNote: 'проба (≈ 3·B_ℓ скв., Donati et al. 2023)', P: 121 }],
+    [/^Gl 338|GJ 338/, { sp: /^M0/, LX: 4.16e27, src: 'ROSAT lg 27,92 на пару A+B — условная компонента, половина (Schmitt & Liefke 2004)', dip: 13, dipNote: 'проба', P: 16.5 }]];
+  // звёзды каталога без данных — спокойная полевая звезда: F_X = 2·10⁴ эрг/(см²·с) (допущение; у F/G/K/M распределения F_X близки — NEXXUS)
+  const FX_QUIET = 2e4;
+  // данные — только своей компоненте (разбор Codex: в каталоге «Proxima Centauri» — система G2V + K1V + M5.5Ve; рентген и диполь Проксимы
+  // не должны доставаться α Cen A и B)
+  const compSp = (sp, comp) => { const parts = String(sp || '').split('+').map(x => x.trim()).filter(Boolean); return parts[Math.min(parts.length - 1, comp | 0)] || ''; };
+  const starData = (name, sp, comp) => { const d = STAR_DATA.find(([re, v]) => re.test(name || '') && (!v.sp || sp == null || v.sp.test(compSp(sp, comp)))); return d ? d[1] : null; };
+  // правила (у Солнца дают его пресет): нагрев короны L_H = 10·L_X (гипотеза стенда); поток областей k_Φ = (L_X/2·10²⁷)^{1/1,15} (L_X ∝ Φ^1,15 —
+  // Pevtsov et al. 2003, полный поток; первое приближение — масштаб границ потока пар); ковёр — та же доля потока, что у Солнца: 10 Гс·k_Φ/R²
+  // (нагрев драйвера линеен по полю ковра — разбор Codex); глубины источников — при той же напряжённости поля физические
+  // (d ∝ √(q·Φ₀/B)), в долях R★ — 0,015 и 0,02·√k_Φ/R; расплывание — с тем же угловым темпом (250·R² км²/с; при солнечном физическом у малых звёзд области таяли в 30–40 раз
+  // быстрее); вспышка — сила × k_Φ; корона протяжённая — как у Солнца (ν = 1); событие 60 с; выброс уходит у G/K, у M заперт (сценарий);
+  // дифф. вращение и меридиональное течение — 0 (не измерены). Гиганты, субгиганты, A/B, белые карлики — без переноса (нет параметризации)
+  function labActivity(name, sp, comp, Rsun) {
+    const cp = SM.classParams(sp, comp), k = cp.info; if (!cp.convective || !/[FGKM]/.test(k.cls) || k.lum !== 'V') return {};
+    const R = Rsun || cp.rSun, d = starData(name, sp, comp) || {}, LX = d.LX || 4 * Math.PI * Math.pow(R * 6.957e10, 2) * FX_QUIET, kF = Math.pow(LX / 2e27, 1 / 1.15);
+    const o = { labLH: 10 * LX, pairQLo: 0.5 * kF, pairQHi: 10 * kF, fluxSlope: 2, labCarpetG: 10 * kF / (R * R), poleDepth: 0.015 * Math.sqrt(kF) / R, labPlageF: 0.3, labPlageD: 0.02 * Math.sqrt(kF) / R,
+      labXNu: 1, cycle: 60, cmeEscape: k.cls === 'M' ? 0 : 1, labDOm: 0, labVmer: 0, spreadKm2s: 250 * R * R, flareQ: (cp.overrides.flareQ || 1.2) * kF };
+    if (d.dip != null) o.dipoleG = d.dip; if (d.tilt != null) o.dipoleTilt = d.tilt; if (d.P) o.labProtD = d.P;
+    return o; }
   // ползунки: [ключ, подпись, мин, макс, шаг]
   const STAR_GROUPS = [
     // этапы 0–1 плана (DOC «План работ — газодинамика короны и поверхность звезды»): поверхность — запас энергии и источник нагрева короны
-    ['Поверхность — физика (этапы 0–1)', [['labFreezeField', 'заморозить поле (полюса стоят, часы идут)', 0, 1, 1], ['labLH', 'мощность нагрева короны (цель), эрг/с (Солнце ≈ 2·10²⁸)', 3e26, 1e29, 1e26],
+    ['Поверхность — физика (этапы 0–1)', [['labFreezeField', 'заморозить поле (полюса стоят, часы идут)', 0, 1, 1], ['labLH', 'мощность нагрева короны (цель), эрг/с (Солнце ≈ 2·10²⁸)', 1e25, 1e29, 1e25],
       ['labCarpetG', 'магнитный ковёр спокойной поверхности, Гс', 0, 1000, 10], ['labVh', 'перемешивание оснований, км/с', 0.05, 1, 0.01], ['labTanTh', 'наклон поля tgθ', 0.02, 0.5, 0.01],
       ['labSteady', 'доля выпуска сразу', 0, 1, 0.05], ['labTau', 'утечка запаса, с', 100, 20000, 100], ['labTauPulse', 'импульс после уничтожения потока, с', 10, 1000, 10],
       ['labEtaH', 'доля выпуска в корону', 0, 1, 0.05], ['labPlageK', 'факелы из карты — яркость', 0, 2, 0.05], ['labPulseK', 'импульсы из карты — яркость', 0, 3, 0.05], ['labMapView', 'показать карту нагрева (проверка)', 0, 1, 1]]],
@@ -44,7 +75,7 @@
       ['labCmeHot', 'нагрев: доля областей нитей, начавших греться к подъёму 0,5 R★ (после срыва; 0 — без нагрева)', 0, 1, 0.05],
       ['labCmeHotE', 'нагрев: яркость нагретых нитей в 171 (0,6–1 МК; по виду: при 1 их почти не видно)', 0, 10, 0.1],
       ['labCmeN', 'частиц — подробность рисунка (масса та же)', 1000, 30000, 500]]],
-    ['Плавание пятен', [['labProtD', 'вращение звезды: период, сут (0 — стоит; Проксима 83,1)', 0, 200, 0.1], ['labOmEq', 'экватор быстрее системы, рад/сут', -0.02, 0.02, 0.001],
+    ['Плавание пятен', [['labProtD', 'вращение звезды: период, сут (0 — стоит; Проксима 89,8)', 0, 200, 0.1], ['labOmEq', 'экватор быстрее системы, рад/сут', -0.02, 0.02, 0.001],
       ['labDOm', 'дифференциальное вращение ΔΩ экв.−полюс, рад/сут (Солнце 0,042; у M-карликов не измерено)', -0.06, 0.06, 0.001], ['labVmer', 'меридиональное течение к полюсам, м/с (не измерено)', -20, 20, 0.5],
       ['labDspot', 'случайное блуждание пятен, км²/с (не измерено)', 0, 10, 0.1], ['labOuH', 'блуждание: время памяти скорости, ч', 2, 96, 1], ['pairRigid', 'пара после расхождения — целиком', 0, 1, 1]]],
     ['Фотосфера — как видит глаз', [['labEye', 'фотосфера по физике: PHOENIX, фотометрия, камера (0 — прежняя)', 0, 1, 1], ['labExpEV', 'экспозиция камеры, ступени', -4, 4, 0.1], ['labCurve', 'кривая камеры: 1 — как плёнка (пересвет через жёлтый), 0 — цвет звезды без сдвига', 0, 1, 1],
@@ -55,15 +86,15 @@
       ['rim', 'кромка по Френелю — сила', 0, 3, 0.05], ['rimPow', 'кромка — резкость', 0.5, 16, 0.5], ['spotSize', 'пятна — размер', 0.002, 0.08, 0.001], ['spotGrow', 'пятна — рост с силой', 0, 0.05, 0.001], ['plage', 'факелы — яркость', 0, 1.5, 0.01],
       ['plageWidth', 'факелы — ширина', 0.001, 0.03, 0.0005], ['bright', 'яркость', 0.3, 2.5, 0.01], ['satBoost', 'насыщенность', 0, 0.6, 0.01]]],
     ['Области и полюса', [['labPlageF', 'активные области в короне: доля потока в пятне (Солнце ≈ 0,3; 1 — весь поток в пятне)', 0.05, 1, 0.05],
-      ['labPlageD', 'активные области в короне: глубина источника площадки, R★ (Солнце 0,03; 0 — без площадки)', 0, 0.08, 0.005], ['regions', 'областей', 0, 24, 1], ['limbShare', 'доля у края диска', 0, 1, 0.01], ['sepMin', 'разнос полюсов — мин, R★', 0.02, 0.6, 0.005],
+      ['labPlageD', 'активные области в короне: глубина источника площадки, R★ (Солнце 0,02; 0 — без площадки)', 0, 0.3, 0.005], ['regions', 'областей', 0, 24, 1], ['limbShare', 'доля у края диска', 0, 1, 0.01], ['sepMin', 'разнос полюсов — мин, R★', 0.02, 0.6, 0.005],
       ['sepMax', 'разнос полюсов — макс, R★', 0.02, 0.6, 0.005], ['qMin', 'сила — мин', 0.1, 2.5, 0.01], ['qMax', 'сила — макс', 0.1, 2.5, 0.01],
-      ['flareSep', 'область вспышки — разнос', 0.05, 0.6, 0.005], ['flareQ', 'область вспышки — сила', 0.2, 3, 0.01], ['poleDepth', 'глубина источников, R★ (Солнце 0,025)', 0.005, 0.3, 0.005],
+      ['flareSep', 'область вспышки — разнос', 0.05, 0.6, 0.005], ['flareQ', 'область вспышки — сила', 0.001, 3, 0.001], ['poleDepth', 'глубина источников, R★ (Солнце 0,025)', 0.005, 0.3, 0.005],
       ['rSS', 'поверхность источника, R★ (дальше поле открыто)', 1.5, 5, 0.1]]],
     ['Поверхность (полюса)', [['surface', 'полюса самостоятельные: 0 — нет, 1 — да', 0, 1, 1], ['surfH', 'часов поверхности на 1 с показа', 0.5, 96, 0.5],
       ['sepKms', 'расхождение новой пары: пик, км/с', 0, 2, 0.01], ['emergeH', 'всплытие потока, ч', 1, 120, 1],
       ['sepStopH', 'расхождение до, ч', 6, 200, 1], ['lifeDays', 'срок жизни пары q ≥ 1, сут (∝ потоку, распад линейный)', 1, 400, 1],
       ['spreadKm2s', 'расплывание распадающихся областей, км²/с (Солнце 250–600; 0 — нет)', 0, 1000, 10], ['spreadDMax', 'расплывание: предел глубины источника, R★', 0.1, 0.8, 0.01], ['birthH', 'новая пара — раз в, ч', 2, 1000, 1],
-      ['clusterFrac', 'рождения рядом с полюсами — доля', 0, 1, 0.01], ['polesTarget', 'полюсов держать', 2, 64, 2], ['fluxSlope', 'рождения пар — наклон N(Φ) ∝ Φ^−s', 1.2, 3.5, 0.05], ['spotBs', 'поле тени пятна, Гс (площадь = Φ/B)', 1500, 6000, 100], ['pairQLo', 'поток пар — мин., |q| (Солнце 0,5)', 0.01, 1, 0.01], ['pairQHi', 'поток пар — макс., |q| (Солнце 10)', 0.3, 12, 0.05], ['latBias', 'перевес к экватору (0 — равномерно)', 0, 6, 0.1], ['cancRate', 'уничтожение потока, доля в час', 0, 0.05, 0.0005],
+      ['clusterFrac', 'рождения рядом с полюсами — доля', 0, 1, 0.01], ['polesTarget', 'полюсов держать', 2, 64, 2], ['fluxSlope', 'рождения пар — наклон N(Φ) ∝ Φ^−s', 1.2, 3.5, 0.05], ['spotBs', 'поле тени пятна, Гс (площадь = Φ/B)', 1500, 6000, 100], ['pairQLo', 'поток пар — мин., |q| (Солнце 0,5)', 0.001, 1, 0.001], ['pairQHi', 'поток пар — макс., |q| (Солнце 10)', 0.01, 30, 0.01], ['latBias', 'перевес к экватору (0 — равномерно)', 0, 6, 0.1], ['cancRate', 'уничтожение потока, доля в час', 0, 0.05, 0.0005],
       ['heatC', 'нагрев от уничтожения, эрг/(см³·с)', 0, 0.3, 0.005], ['heatE', 'нагрев от всплытия, эрг/(см³·с)', 0, 0.1, 0.001], ['birthBright', 'яркость рождения (точки, факел)', 0, 4, 0.05]]],
     ['Вспышка и выброс', [['cycle', 'цикл события, с показа (Солнце 60 ≈ 3 ч; поверхность на время события стоит)', 6, 120, 0.5], ['flashDecay', 'спад вспышки, с', 0.3, 5, 0.05], ['ribbons', 'ленты — яркость', 0, 6, 0.05],
       ['dipoleG', 'диполь звезды, Гс (запирает выброс)', 0, 1000, 5], ['dipoleTilt', 'диполь — наклон к оси вращения, °', 0, 90, 1], ['ncr', 'срыв: порог показателя спада', 0.5, 3, 0.05], ['ropeDrive', 'разгон жгута, в g', 0, 10, 0.1],
@@ -172,6 +203,8 @@
   if ((st.hou | 0) < 70) { for (const k of ['labCmeTau', 'labCmeE', 'labCmeFall', 'labCmeN']) st.star[k] = PHYS[k]; st.hou = 70; }
   // нагрев нитей выброса по времени (автор: «давай нагрев по времени»)
   if ((st.hou | 0) < 72) { for (const k of ['labCmeHot', 'labCmeHotE']) st.star[k] = PHYS[k]; st.hou = 72; }
+  // перенос с Солнца на другие звёзды (автор: «надо к остальным звёздам всё подключать») — к текущей звезде; пресет — поверх правил
+  if ((st.hou | 0) < 73) { const pr = PRESETS.find(x => x[0] === st.name); st.star = Object.assign({}, PHYS, labActivity(st.name, st.sp, st.comp, st.R), pr ? pr[4] || {} : {}); st.hou = 73; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
       const cL = corona.carpet ? corona.carpet().L : 0.03;
@@ -329,17 +362,18 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     // глубине, что в середине тени поле B_s (3 кГс; поле над зарядом q на глубине d — gUnit·q/d², единица модели — разбор Codex), его доля — × фаза тени (распадается пятно — поток остаётся
     // в площадке); площадка — не мельче источника полюса (расплывание уводит его глубже). Только корона стенда (её поле и нагрев); модель
     // звезды, фотосфера и игра — прежние
+    const spotMin = 1e21 * Math.pow(o.R / 6.957e10, 2);   // пора / пятно: 10²¹ Мкс у Солнца, у других — × (R/R☉)² (то же поле на той же доле поверхности)
     const e = effStar(), fs0 = e.labPlageF != null ? e.labPlageF : 1, dP = e.labPlageD || 0, d00 = star.params.poleDepth, gU = SM.charges([], star.params).gUnit;
     const split = dP > 0 && fs0 < 1 && !(corona && corona.maxCharges && corona.maxCharges() < 256);   // видеокарта с малым пределом — без площадок
     const PS = []; for (const Q of PV) { if (Q.q === 0) continue; if (!split) { PS.push(Q); continue; }
       // пятно с потоком меньше 10²¹ Мкс (пора) — без своего заряда, его поток — в площадке (зарядов вдвое меньше: дешевле снимки поля)
-      const fs = Math.abs(Q.q) * fs0 * sFo(Q) * o.PHI0 >= 1e21 ? fs0 * sFo(Q) : 0, d0 = Q.dep > 0 ? Q.dep : d00, ds = Math.min(d0, Math.sqrt(gU * Math.abs(Q.q) * fs / o.spotBs));
+      const fs = Math.abs(Q.q) * fs0 * sFo(Q) * o.PHI0 >= spotMin ? fs0 * sFo(Q) : 0, d0 = Q.dep > 0 ? Q.dep : d00, ds = Math.min(d0, Math.sqrt(gU * Math.abs(Q.q) * fs / o.spotBs));
       if (fs > 0) PS.push({ p: Q.p, q: Q.q * fs, dep: Math.max(1e-3, ds), uid: Q.uid }); PS.push({ p: Q.p, q: Q.q * (1 - fs), dep: Math.max(dP, d0), uid: -1 - Q.uid }); }
     // предел зарядов видеокарты (разбор Codex): с изображениями заряд — два места; не влезает — остаются сильнейшие полюса целиком (иначе
     // обрезались бы изображения последних и поле менялось)
     { const cap = corona && corona.maxCharges ? corona.maxCharges() : 256, per = star.params.rSS > 1 ? 2 : 1, nz = PS.filter(Q => Q.q !== 0);
       if (nz.length * per > cap) { nz.sort((a, b) => Math.abs(b.q) - Math.abs(a.q)); PS.length = 0; PS.push(...nz.slice(0, Math.floor(cap / per))); } }
-    const spots = PV.filter(Q => !Q.dead && Math.abs(Q.q) >= o.qPore && sFo(Q) > 0 && (!split || Math.abs(Q.q) * fs0 * sFo(Q) * o.PHI0 >= 1e21)).map(Q => { const n = Q.p.clone().normalize(), A = Math.abs(Q.q) * (split ? fs0 : 1) * o.PHI0 * sFo(Q) / o.spotBs;
+    const spots = PV.filter(Q => !Q.dead && Math.abs(Q.q) >= o.qPore && sFo(Q) > 0 && (!split || Math.abs(Q.q) * fs0 * sFo(Q) * o.PHI0 >= spotMin)).map(Q => { const n = Q.p.clone().normalize(), A = Math.abs(Q.q) * (split ? fs0 : 1) * o.PHI0 * sFo(Q) / o.spotBs;
       return [n.x, n.y, n.z, Math.acos(Math.max(-1, 1 - A / (2 * Math.PI * o.R * o.R)))]; });
     // заряды — с uid полюсов в их порядке и признаком изображений: корона по ним переносит основания трубок (разбор Codex)
     const C = SM.charges(PS, star.params); C.uids = PS.filter(Q => Q.q !== 0).map(Q => Q.uid); C.img = star.params.rSS > 1;
@@ -350,7 +384,11 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     const c = cls(), k = c.info, rS = rSunEff(), rKm = rS * SM.R_SUN_KM, hex = '#' + c.colorHex.toString(16).padStart(6, '0');
     const lum = { V: 'главная последовательность', IV: 'субгигант', III: 'гигант', I: 'сверхгигант', D: 'белый карлик' }[k.lum];
     $('info').innerHTML = `<span class="sw" style="background:${hex}"></span><b>${k.cls}${k.cls === 'D' ? '' : k.sub} ${k.lum === 'D' ? '' : k.lum}</b> · ${lum} · <b>${k.teff.toLocaleString('ru')} K</b><br>`
-      + `R★ = <b>${rS < 0.1 ? rS.toFixed(3) : rS.toFixed(2)} R☉</b> ≈ ${Math.round(rKm).toLocaleString('ru')} км, M★ ≈ ${mSunEff().toFixed(2)} M☉${st.R ? '' : ' (по классу)'} · активность ${c.activity.toFixed(2)} · ${c.convective ? 'конвекция: пятна, арки, вспышки' : 'без конвективной оболочки: поверхность гладкая'}`;
+      + `R★ = <b>${rS < 0.1 ? rS.toFixed(3) : rS.toFixed(2)} R☉</b> ≈ ${Math.round(rKm).toLocaleString('ru')} км, M★ ≈ ${mSunEff().toFixed(2)} M☉${st.R ? '' : ' (по классу)'} · активность ${c.activity.toFixed(2)} · ${c.convective ? 'конвекция: пятна, арки, вспышки' : 'без конвективной оболочки: поверхность гладкая'}`
+      // перенос с Солнца (автор: «надо к остальным звёздам всё подключать»): откуда рентген и поле этой звезды — данные или оценка
+      + (() => { const a = labActivity(st.name, st.sp, st.comp, st.R); if (!a.labLH) return c.convective ? '<br><span style="color:var(--dim)">корона по правилам Солнца — не переносится (гигант/субгигант)</span>' : '';
+        const d = starData(st.name, st.sp, st.comp), lx = a.labLH / 10, f = x => { const e = Math.floor(Math.log10(x)); return (x / Math.pow(10, e)).toFixed(1).replace('.', ',') + '·10' + String(e).split('').map(ch => '⁰¹²³⁴⁵⁶⁷⁸⁹'[+ch]).join(''); };
+        return `<br><span style="color:var(--dim)">рентген L<sub>X</sub> ≈ ${f(lx)} эрг/с — ${d ? d.src : 'оценка: спокойная полевая звезда (F<sub>X</sub> = 2·10⁴)'}${d && d.dipNote ? ` · диполь ${d.dip} Гс — ${d.dipNote}` : ` · диполь ${effStar().dipoleG} Гс — допущение стенда (нет данных)`}</span>`; })();
     const comp = $('comp'); comp.innerHTML = k.parts.map((p, i) => `<option value="${i}"${i === (st.comp | 0) ? ' selected' : ''}>${i + 1}: ${p}</option>`).join(''); comp.classList.toggle('hidden', k.parts.length < 2);
   }
   function slider(key, label, min, max, step, eff, which) {
@@ -376,9 +414,9 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   $('starList').innerHTML = STARS.map(s => `<option value="${s.name.replace(/"/g, '&quot;')}">${s.sp}</option>`).join('');
   $('starName').addEventListener('change', e => { const s = STARS.find(x => x.name === e.target.value); if (s) setStar(s.sp, s.name, s.sp.split('+').length - 1); });
   $('spec').addEventListener('change', e => setStar(e.target.value.trim() || 'G2V', '', 0));   // свой спектр — радиус и масса по классу
-  $('comp').addEventListener('change', e => { st.comp = +e.target.value; groups(); build(); });
+  $('comp').addEventListener('change', e => { st.comp = +e.target.value; const pr = PRESETS.find(x => x[0] === st.name); st.star = Object.assign({}, PHYS, labActivity(st.name, st.sp, st.comp, st.R), pr ? pr[4] || {} : {}); save(); groups(); build(); });   // другая компонента — другая звезда: правила заново (разбор Codex)
   // смена звезды: параметры — к основе стенда PHYS (+ известное о звезде: диполь), а не к старой модели нитей
-  function setStar(sp, name, comp, R, M, ov) { st.sp = sp; st.name = name; st.comp = comp; st.R = R || 0; st.M = M || 0; st.star = Object.assign({}, PHYS, ov || {}); $('spec').value = sp;
+  function setStar(sp, name, comp, R, M, ov) { st.sp = sp; st.name = name; st.comp = comp; st.R = R || 0; st.M = M || 0; st.star = Object.assign({}, PHYS, labActivity(name, sp, comp, R), ov || {}); $('spec').value = sp;
     $('starName').value = STARS.some(s => s.name === name) ? name : ''; groups(); build(); }
   for (const [id, key] of [['optFlares', 'flares'], ['optCme', 'cme']]) { $(id).checked = st[key]; $(id).addEventListener('change', e => { st[key] = e.target.checked; build(); }); }
   // глоу: переключатель и ползунки (сила, порог яркости, радиус)
