@@ -28,7 +28,7 @@
   const BAKE_HEAD = `precision highp float; precision highp int; precision highp sampler2D;
     layout(location = 0) out vec4 o0;
     uniform sampler2D uFH; uniform int uFHW, uFHH; uniform float uLayer, uNr, uNt, uNp, uRmin, uRmax, uRcm, uGM, uTopen, uNopen, uBmin, uSW, uSH, uStepMode;
-    uniform highp sampler3D uBG; uniform float uGOn, uGR0;
+    uniform highp sampler3D uBG; uniform float uGOn, uGR0, uWarmV, uTWarmV;
     ${FIELD_GLSL}
     const float PI = 3.14159265359, KB = ${KB.toExponential(6)}, MP = ${MP.toExponential(6)}, MU = ${MU.toFixed(6)};
     // поле для хода вдоль линии (автор: «давай поле в текстуру»): выше 1,02 R★ — из сетки (вектор поля и расстояние до ближайшего источника,
@@ -95,7 +95,12 @@
       } else if (g.a == 2.0) { T = uTopen; pb = uNopen * KB * T * 2.3 / 1.2; foot = 0.5 * octUnpack(g.r); }   // открытая: длина метки ½ — признак
       float eps = 0.0;
       if (T > 0.0 && pb > 0.0) { float aa = MU * MP * uGM / (KB * T * uRcm) * (1.0 - 1.0 / r);   // равновесие под тяжестью, изотермически
-        float n9 = (1.2 / 2.3) * pb * exp(-aa) / (KB * T) / 1e9; eps = n9 * n9 * resp174(T); }
+        float n9 = (1.2 / 2.3) * pb * exp(-aa) / (KB * T) / 1e9; eps = n9 * n9 * resp174(T);
+        // тёплая составляющая (автор: «давай активные области доводи»): корона активной области многотемпературная — веерные петли ≈ 1 МК
+        // плотнее и холоднее равновесия RTV; у горячих замкнутых петель (плавно от 1,6 до 2,6 МК) доля uWarmV плазмы при том же давлении
+        // у основания — при uTWarmV, со своей шкалой высот (эмпирически, по виду активных областей на снимках SDO 171); вдоль настоящих линий
+        if (g.a == 1.0 && uWarmV > 0.0 && T > uTWarmV) { float aw = MU * MP * uGM / (KB * uTWarmV * uRcm) * (1.0 - 1.0 / r), nw = (1.2 / 2.3) * pb * exp(-aw) / (KB * uTWarmV) / 1e9;
+          eps += uWarmV * smoothstep(1.6e6, 2.6e6, T) * nw * nw * resp174(uTWarmV); } }
       // R — свечение 17,4 нм; GBA — основание силовой линии (единичный вектор — замкнутая, длина ½ — открытая, 0 — нет основания)
       o0 = vec4(eps, foot);
     }`;
@@ -154,7 +159,10 @@
         if (F > 0.0 && L > 0.0) { float x = pow(F / 9.8e4 * L, 2.0 / 7.0); pb = x * x * x / L; T = clamp(1400.0 * x, 3e5, 2e7); } }
       else { T = uTopen; pb = uNopen * KB * T * 2.3 / 1.2; }   // открытая: T и n у основания
       if (T <= 0.0 || pb <= 0.0) return vec4(0.0);
-      float n9 = (1.2 / 2.3) * pb / (KB * T) / 1e9; return colJ4(n9 * n9 * resp174(T), 2.0 * MU * MP * uGM / (KB * T * uRcm), rt); }
+      float n9 = (1.2 / 2.3) * pb / (KB * T) / 1e9; vec4 J = colJ4(n9 * n9 * resp174(T), 2.0 * MU * MP * uGM / (KB * T * uRcm), rt);
+      // тёплая составляющая горячих петель (как в объёме)
+      if (g.x >= 0.0 && uWarmV > 0.0 && T > uTWarmV) { float nw = (1.2 / 2.3) * pb / (KB * uTWarmV) / 1e9; J += colJ4(uWarmV * smoothstep(1.6e6, 2.6e6, T) * nw * nw * resp174(uTWarmV), 2.0 * MU * MP * uGM / (KB * uTWarmV * uRcm), rt); }
+      return J; }
     ivec2 stor(ivec2 q) { ivec2 h = ivec2(int(uSW), int(uSH)) / 2; return ivec2((q.x & 1) * h.x + (q.x >> 1), (q.y & 1) * h.y + (q.y >> 1)); }   // форма — по фазам (см. SGEO_FS)
     // форма плитки сменяется не скачком (автор: «дергается все»): яркость — смесь по прежней и новой форме, доля новой w растёт от 0 до 1 за
     // промежуток между двумя последними обновлениями плитки — форма едет непрерывно, отставая на этот промежуток (видимое — ≈ 4 кадра)
@@ -220,7 +228,7 @@
   // ≈ 20 тыс. км у Солнца) — ≈ 1 МК и плотные. Нагрев — местный (карта нагрева) × узор сети (среднее 1); газ — RTV на полудлине; свечение у
   // основания ε₀ = n²·R174(T), высота слоя — меньшая из высоты петли (L/π) и половины шкалы высот (свечение ∝ n²)
   const CARP_FS = BAKE_HEAD + `
-    uniform sampler2D uNet; uniform float uCW, uCH, uCL, uNetK, uXL, uXNu;
+    uniform sampler2D uNet; uniform float uCW, uCH, uCL, uNetK, uXL, uXNu, uWarm, uTWarm;
     void main() { vec2 ij = gl_FragCoord.xy; float ph = 2.0 * PI * ij.x / uCW, th = PI * ij.y / uCH; vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
       float F0 = max(fh(n), 0.0), N = texture(uNet, vec2(ij.x / uCW, ij.y / uCH)).r * uNetK, F = F0 * N, Lh = 0.5 * uCL * uRcm, e0 = 0.0, He = 1e-4, eX = 0.0, HX = 1e-4;
       if (F > 0.0) { float x = pow(F / 9.8e4 * Lh, 2.0 / 7.0), T = clamp(1400.0 * x, 1e5, 2e7), p = x * x * x / Lh, n9 = (1.2 / 2.3) * p / (KB * T) / 1e9;
@@ -229,19 +237,25 @@
       // T по RTV; плотность — RTV × uXNu: наблюдаемые тёплые петли плотнее равновесия RTV (Aschwanden et al. 2001; Winebarger et al. 2003) —
       // эмпирическая поправка, подобрана по профилю над краем на снимке SDO/AIA 171; шкала высот свечения — половина гидростатической
       if (F0 > 0.0 && uXNu > 0.0) { float Lx = 0.5 * uXL * uRcm, x = pow(F0 / 9.8e4 * Lx, 2.0 / 7.0), T = clamp(1400.0 * x, 1e5, 2e7), p = x * x * x / Lx, n9 = uXNu * (1.2 / 2.3) * p / (KB * T) / 1e9;
-        eX = n9 * n9 * resp174(T); HX = max(1e-3, 0.5 * KB * T * uRcm / (MU * MP * uGM)); }
+        eX = n9 * n9 * resp174(T); HX = max(1e-3, 0.5 * KB * T * uRcm / (MU * MP * uGM));
+        // тёплая составляющая (автор: «давай активные области доводи»): корона активной области многотемпературная — веерные петли ≈ 1 МК
+        // плотнее и холоднее равновесия RTV; где RTV горячее (плавно от 1,6 до 2,6 МК — только активные области), доля uWarm плазмы при том же давлении — при uTWarm (эмпирически, по
+        // яркости активных областей на снимках SDO 171); высота слоя — по излучению обеих частей
+        if (uWarm > 0.0 && T > uTWarm) { float nw = uXNu * (1.2 / 2.3) * p / (KB * uTWarm) / 1e9, ew = uWarm * smoothstep(1.6e6, 2.6e6, T) * nw * nw * resp174(uTWarm), hw = max(1e-3, 0.5 * KB * uTWarm * uRcm / (MU * MP * uGM));
+          HX = (eX * HX + ew * hw) / max(eX + ew, 1e-30); eX += ew; } }
       o0 = vec4(e0, He, eX, HX); }`;   // ковёр: свечение у основания и высота слоя; протяжённая корона: то же
   // мох — переходный слой у оснований горячих петель (автор: «давай активные области»): ядра активных областей — 2–4 МК, в 17,1 нм тусклые;
   // ярок их переходный слой, где температура проходит через ≈ 1 МК при высоком давлении. Тепло проводится вниз: κ₀T^{5/2}·dT/ds = F_c ≈ F,
   // поэтому столб n_e²·ds = (n_e·T)²·κ₀·T^{1/2}/F·dT; свёртка с откликом R174 (гауссиана по lg T) — ln10·T₀^{3/2}·1,09·σ√(2π) ≈ 6,35·10⁸,
   // до 0,7·T_max (выше — корона петли, её считает своя часть); давление — RTV петли длиной uXL при местном нагреве
   const MOSS_FS = BAKE_HEAD + `
-    uniform sampler2D uNet; uniform float uCW, uCH, uXL, uNetK;
+    uniform sampler2D uNet; uniform float uCW, uCH, uXL, uNetK, uMossL, uMossFc;
     float ncdf(float z) { return 0.5 * (1.0 + tanh(0.7978845608 * (z + 0.044715 * z * z * z))); }
     void main() { vec2 ij = gl_FragCoord.xy; float ph = 2.0 * PI * ij.x / uCW, th = PI * ij.y / uCH; vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
       float N = texture(uNet, vec2(ij.x / uCW, ij.y / uCH)).r * uNetK, F = max(fh(n), 0.0) * sqrt(max(N, 0.0)), I = 0.0;
-      if (F > 0.0) { float Lh = 0.5 * uXL * uRcm, x = pow(F / 9.8e4 * Lh, 2.0 / 7.0), Tm = 1400.0 * x, p = x * x * x / Lh, pk = (1.2 / 2.3) * p / KB;
-        I = pk * pk * 1e-6 / F * 6.35e8 * ncdf((log(0.7 * Tm) / log(10.0) - 6.0) / 0.12) / (1e18 * uRcm); }
+      // петли ядра активной области — длиной uMossL (≈ 55 тыс. км у Солнца); вниз проводится доля uMossFc нагрева (у горячих петель ≈ половина)
+      if (F > 0.0) { float Lh = 0.5 * uMossL * uRcm, x = pow(F / 9.8e4 * Lh, 2.0 / 7.0), Tm = 1400.0 * x, p = x * x * x / Lh, pk = (1.2 / 2.3) * p / KB;
+        I = pk * pk * 1e-6 / (uMossFc * F) * 6.35e8 * ncdf((log(0.7 * Tm) / log(10.0) - 6.0) / 0.12) / (1e18 * uRcm); }
       o0 = vec4(I, 0.0, 0.0, 0.0); }`;   // столб мха по вертикали, в единицах n₉²·R★
   const TUBE_VS = `precision highp float; precision highp sampler2D;
     in vec2 corner; uniform sampler2D uPA, uPB, uGas, uHP, uHT; uniform int uMt; uniform mat4 uView, uProj; uniform vec3 uCam; uniform float uRcm, uShowR, uFill, uPx;
@@ -511,6 +525,7 @@
     const bu = { uFH: { value: fhTex }, uFHW: { value: 128 }, uFHH: { value: 64 }, uLayer: { value: 0 }, uNr: { value: o.Nr }, uNt: { value: o.Nt }, uNp: { value: o.Np }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uRcm: { value: R }, uGM: { value: G * M }, uTopen: { value: o.Topen }, uNopen: { value: o.nOpen }, uBmin: { value: 1e-3 }, uStepMode: { value: 1 },
       uC: { value: uC }, uNC: { value: 0 }, uDip: { value: 0 }, uDipU: { value: 0 }, uGU: { value: 1 }, uDipM: { value: new THREE.Vector3(0, 1, 0) } };
+    bu.uWarmV = { value: o.warmV != null ? o.warmV : 0.1 }; bu.uTWarmV = { value: 1.1e6 };   // тёплая составляющая петель активных областей
     bu.uSW = { value: o.surfW }; bu.uSH = { value: o.surfH }; bu.uRc = { value: 1 + o.shell };
     bu.uSP = { value: new THREE.Vector4(halton(1, 2), halton(1, 3), halton(2, 2), halton(2, 3)) };   // точки двух отсчётов внутри ячейки
     // таблица столба R(ln A, u) = J4/(e₀·w) — по 5 узлам Гаусса — Лежандра (как прежде в шейдере), 64 × 32
@@ -1106,7 +1121,7 @@
         slots: sl.map(S => ({ k: S.k, gen: S.gen, wk: S.wk, L: S.Lr, T0: S.T0, FA: S.FA, FB: S.FB, t: S.t, lag: S.lag, blend: S.blend, N: S.N, Tmax: S.tot && S.tot.Tmax, dMass: S.tot && S.tot.dMass, heatErr: S.tot && S.t > 0 ? S.tot.heat / (S.t * S.tot.heatIn) - 1 : null })) }; }
     // ---- магнитный ковёр: узор сети (ячейки супергрануляции — Вороной по случайным центрам на сфере с шагом net, нагрев — на границах ячеек:
     // там собираются мелкие элементы поля) и слой ковра (проход CARP_FS — каждый кадр, по живой карте нагрева)
-    const carp = { on: false, L: o.carpL || 0.03, net: o.carpNet || 0.043, lane: o.carpLane || 0.25, floor: o.carpFloor != null ? o.carpFloor : 0.05, clump: o.carpClump != null ? o.carpClump : 1, seed: o.carpSeed || 7, xL: o.carpXL || 0.3, xNu: o.carpXNu != null ? o.carpXNu : 1.5, moss: o.moss !== false };   // по снимку SDO/AIA 171 (16.10.2026): ν = 1,5 — профиль над краем; фон ячейки 0,05 и сгустки 1 — контраст сети
+    const carp = { on: false, L: o.carpL || 0.03, net: o.carpNet || 0.043, lane: o.carpLane || 0.25, floor: o.carpFloor != null ? o.carpFloor : 0.05, clump: o.carpClump != null ? o.carpClump : 1, seed: o.carpSeed || 7, xL: o.carpXL || 0.3, xNu: o.carpXNu != null ? o.carpXNu : 1.5, moss: o.moss !== false, mossL: o.mossL || 0.08, mossFc: o.mossFc || 0.5, warm: o.warm != null ? o.warm : 0 };   // тёплая — вдоль настоящих линий (объём и текстура, bu.uWarmV); в слое у поверхности — только для проверки   // по снимку SDO/AIA 171 (16.10.2026): ν = 1,5 — профиль над краем; фон ячейки 0,05 и сгустки 1 — контраст сети
     const NW = 512, NH = 256, netData = new Uint8Array(NW * NH * 4), netTex = new THREE.DataTexture(netData, NW, NH, THREE.RGBAFormat, THREE.UnsignedByteType);
     Object.assign(netTex, { magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, generateMipmaps: false, flipY: false });
     let netK = 4;   // множитель: узор хранится как N/4 в байте
@@ -1130,12 +1145,12 @@
       for (let k = 0; k < val.length; k++) { const v = Math.round(255 * Math.min(1, val[k] / netK)); netData[4 * k] = netData[4 * k + 1] = netData[4 * k + 2] = v; netData[4 * k + 3] = 255; }
       netTex.needsUpdate = true; }
     const carpRT = new THREE.WebGLRenderTarget(512, 256, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false });
-    const cu = Object.assign({}, bu, { uNet: { value: netTex }, uCW: { value: 512 }, uCH: { value: 256 }, uCL: { value: carp.L }, uNetK: { value: 4 }, uXL: { value: carp.xL }, uXNu: { value: carp.xNu } });
+    const cu = Object.assign({}, bu, { uNet: { value: netTex }, uCW: { value: 512 }, uCH: { value: 256 }, uCL: { value: carp.L }, uNetK: { value: 4 }, uXL: { value: carp.xL }, uXNu: { value: carp.xNu }, uMossL: { value: carp.mossL }, uMossFc: { value: carp.mossFc }, uWarm: { value: carp.warm }, uTWarm: { value: 1.1e6 } });
     const carpMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: CARP_FS, uniforms: cu, depthTest: false, depthWrite: false });
     const mossRT = new THREE.WebGLRenderTarget(512, 256, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false });
     const mossMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: MOSS_FS, uniforms: cu, depthTest: false, depthWrite: false });
     let netMade = false;
-    function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; } cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; pass(carpMat, carpRT); ru.uCarp.value = carpRT.texture; ru.uNet2.value = netTex; ru.uNetK2.value = netK;
+    function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; } cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; cu.uMossL.value = carp.mossL; cu.uMossFc.value = carp.mossFc; cu.uWarm.value = carp.warm; pass(carpMat, carpRT); ru.uCarp.value = carpRT.texture; ru.uNet2.value = netTex; ru.uNetK2.value = netK;
       ru.uCarpRs.value = 1 + 6 * carp.L / Math.PI; ru.uExtRs.value = 1 + 6 * 0.5 * KB * 2e6 * R / (MU * MP * G * M); ru.uMossRs.value = 1 + 6 * ru.uMossH.value;
       if (carp.moss) { pass(mossMat, mossRT); ru.uMoss.value = mossRT.texture; } else ru.uMoss.value = blackTex; }
     const blackTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat); blackTex.needsUpdate = true;
