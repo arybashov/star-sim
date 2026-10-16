@@ -401,6 +401,18 @@
     // мех на диске — только на ярких линиях (автор: «в центре должна быть текстура только ярких линий»): доля меха в точке луча — по её
     // яркости в шкале тона картинки (свечение на столбе 0,1 R★ против границ яркости калибровки): тусклый газ — гладкий, яркие петли — нитями
     float furGate(float e) { float tn = log(1.0 + e * 0.1 / uI0) / log(1.0 + uIw / uI0); return smoothstep(uFurLo, uFurHi, tn); }
+    // слой у поверхности (ковёр, протяжённая корона, мох): свечение e·exp(−h/H) с местными e, H точки поверхности под каждой точкой луча —
+    // интегралом вдоль луча внутри сферы Rs (автор: «эти вот проекции пятен на текстуру — наверное не надо делать — свет так не распространяется
+    // в газе»: прежде столб брался по одной точке под касательной — пятно у края «проецировалось» вверх тёмным столбом)
+    uniform float uCarpRs, uExtRs, uMossRs;
+    vec2 surfUV(vec3 P) { return vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI); }
+    float layerCol(vec3 o, vec3 d, float tHit, float Rs, int comp, int NS, float jit) {
+      vec2 ts; if (!sphere(o, d, Rs, ts)) return 0.0; float t0 = max(ts.x, 0.0), t1 = tHit > 0.0 ? min(ts.y, tHit) : ts.y; if (t1 <= t0) return 0.0;
+      float dt = (t1 - t0) / float(NS), acc = 0.0;
+      for (int k = 0; k < 32; k++) { if (k >= NS) break; vec3 x = o + (t0 + (float(k) + jit) * dt) * d; float r = length(x), h = r - 1.0; if (h < 0.0) continue; vec2 uv = surfUV(x / r);
+        float e, H; if (comp == 2) { e = texture(uMoss, uv).r / uMossH; H = uMossH; } else { vec4 c = texture(uCarp, uv); e = comp == 0 ? c.x : c.z; H = comp == 0 ? c.y : c.w; }
+        acc += e * exp(-h / max(H, 1e-5)); }
+      return acc * dt; }
     float furM(float fr, vec3 foot, bool ok) { if (uGas > 0.5) return fr > 0.0 && ok ? mix(1.0, furW(foot), fr) : 1.0; return fr > 0.0 && ok ? fr * furW(foot) : 0.0; }
     void main() {
       // луч — из поля зрения камеры (без обращения проекции: при дальней плоскости в 10⁵ точности float не хватало)
@@ -444,17 +456,9 @@
       // (0,8) и трубки заменяют часть его света — прежде трубки давали 6 % света фона в своих пикселях (прибавка тона ≈ 0,01) и тонули;
       // у края wt = 0 — прежняя звезда без изменений
       I = I * (1.0 - wt * uTK) + wt * It;
-      // ковёр: тонкий слой у поверхности (экспонента с высотой He) — на диске столб по наклону луча, над краем — путь по касательной
-      // (√(2π·b·He)·e^(−(b−1)/He)); у самого края над ним вдвое ярче, чем на диске: дальнюю половину на диске закрывает звезда
-      if (uCarpOn > 0.5) { vec2 tq; float cc = 0.0;
-        if (sphere(o, d, 1.0, tq) && tq.x > 0.0) { vec3 P = normalize(o + tq.x * d); float m = max(0.0, -dot(P, d)); vec4 c = texture(uCarp, vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI));
-          vec2 uvP = vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI);
-          cc = c.x * c.y / sqrt(m * m + 2.0 * c.y / PI) + c.z * c.w / sqrt(m * m + 2.0 * c.w / PI) + texture(uMoss, uvP).r / sqrt(m * m + 2.0 * uMossH / PI); }
-        else { float tcl = -dot(o, d); if (tcl > 0.0) { vec3 Pt = o + tcl * d; float bq = length(Pt); vec3 P = Pt / bq; vec4 c = texture(uCarp, vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI));
-          if (bq - 1.0 < 30.0 * c.y) cc += c.x * exp(-(bq - 1.0) / c.y) * sqrt(2.0 * PI * bq * c.y);
-          if (bq - 1.0 < 30.0 * c.w) cc += c.z * exp(-(bq - 1.0) / c.w) * sqrt(2.0 * PI * bq * c.w);
-          if (bq - 1.0 < 30.0 * uMossH) cc += texture(uMoss, vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI)).r / uMossH * exp(-(bq - 1.0) / uMossH) * sqrt(2.0 * PI * bq * uMossH); } }
-        I += cc; }
+      // ковёр, протяжённая корона и мох — интегралом вдоль луча (на диске — до поверхности: дальнюю сторону закрывает звезда)
+      if (uCarpOn > 0.5) { vec2 tq; float tHit = sphere(o, d, 1.0, tq) && tq.x > 0.0 ? tq.x : -1.0, jt = hash(gl_FragCoord.xy + 17.0);
+        I += layerCol(o, d, tHit, uCarpRs, 0, 16, jt) + layerCol(o, d, tHit, uExtRs, 1, 24, jt) + layerCol(o, d, tHit, uMossRs, 2, 12, jt); }
       if (uRaw > 0.5) { o0 = vec4(I, disk ? 1.0 : 0.0, 0.0, 1.0); return; }
       float x = log(1.0 + I / uI0) / log(1.0 + uIw / uI0);
       o0 = vec4(gold(clamp(x, 0.0, 1.0)) * uW, uW);   // предумноженный: результат = ультрафиолет·w + прежний кадр·(1 − w)
@@ -548,7 +552,7 @@
     const ru = { uVol: { value: vols[0].texture }, uVolB: { value: vols[1].texture }, uHist: { value: null }, uHistD: { value: null }, uDW: { value: null }, uDOn: { value: 0 }, uMix: { value: 0 },
       uRc: { value: 1 + o.shell }, uMuA: { value: o.muA }, uMuB: { value: o.muB }, uSurfOn: { value: o.surf }, uCamRot: { value: new THREE.Matrix3() }, uCam: { value: new THREE.Vector3() }, uTanH: { value: 0.4 }, uAspect: { value: 1 }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uI0: { value: 1 }, uIw: { value: 100 }, uW: { value: 1 }, uRaw: { value: 0 }, uSteps: { value: 600 },
-      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
+      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
     const rayMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: RAY_FS, uniforms: ru, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
     const rq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), rayMat), rs = new THREE.Scene(); rq.frustumCulled = false; rs.add(rq);
@@ -1129,6 +1133,7 @@
     const mossMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: MOSS_FS, uniforms: cu, depthTest: false, depthWrite: false });
     let netMade = false;
     function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; } cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; pass(carpMat, carpRT); ru.uCarp.value = carpRT.texture;
+      ru.uCarpRs.value = 1 + 6 * carp.L / Math.PI; ru.uExtRs.value = 1 + 6 * 0.5 * KB * 2e6 * R / (MU * MP * G * M); ru.uMossRs.value = 1 + 6 * ru.uMossH.value;
       if (carp.moss) { pass(mossMat, mossRT); ru.uMoss.value = mossRT.texture; } else ru.uMoss.value = blackTex; }
     const blackTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat); blackTex.needsUpdate = true;
     function setCarpet(v) { if (v && typeof v === 'object') { const remake = ['net', 'lane', 'floor', 'clump', 'seed'].some(k => v[k] != null && v[k] !== carp[k]); Object.assign(carp, v); if (remake) netMade = false; } else carp.on = !!v; ru.uCarpOn.value = carp.on ? 1 : 0; }
