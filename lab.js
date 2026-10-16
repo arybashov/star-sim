@@ -19,7 +19,7 @@
   // 25 Гс — значение Барнарда — грело спокойную поверхность сильнее ковра), полюса мельче — 0,015 R (пик поля площадок ≈ 450 Гс; прежде 0,025 R (у M-карликов 0,06: на Солнце поле расплывалось до 33 Гс,
   // в активной области 100–300 Гс), ковёр — 10 Гс беззнакового поля (среднее спокойного Солнца по HMI ≈ 10 Гс; доля концентраций спокойной поверхности < 1 %; 500 Гс — 17 %: спокойная
   // поверхность грелась почти как активная область)
-  const PRESETS = [['Солнце', 'G2V', 1, 1, { labLH: 2e28, poleDepth: 0.015, labCarpetG: 10, dipoleG: 7, pairQLo: 0.5, pairQHi: 10, fluxSlope: 2, labProtD: 25.38, labDOm: 0.0418, labVmer: 15, labPlageF: 0.3, labPlageD: 0.02, labXNu: 1, cycle: 60 }], ['Барнард', 'M4V', 0.187, 0.162, { dipoleG: 25, labUBVRI: [12.497, 11.24, 9.511, 8.298, 6.741], labProtD: 145 }], ['Проксима', 'M5.5Ve', 0.154, 0.122, { dipoleG: 135, dipoleTilt: 51, labUBVRI: [14.21, 12.95, 11.13, 9.45, 7.41], labTeff: 3050, labProtD: 83.1 }], ['ε Индейца', 'K5V', 0.71, 0.76],
+  const PRESETS = [['Солнце', 'G2V', 1, 1, { labLH: 2e28, poleDepth: 0.015, labCarpetG: 10, dipoleG: 7, pairQLo: 0.5, pairQHi: 10, fluxSlope: 2, labProtD: 25.38, labDOm: 0.0418, labVmer: 15, labPlageF: 0.3, labPlageD: 0.02, labXNu: 1, cycle: 60, cmeEscape: 1 }], ['Барнард', 'M4V', 0.187, 0.162, { dipoleG: 25, labUBVRI: [12.497, 11.24, 9.511, 8.298, 6.741], labProtD: 145 }], ['Проксима', 'M5.5Ve', 0.154, 0.122, { dipoleG: 135, dipoleTilt: 51, labUBVRI: [14.21, 12.95, 11.13, 9.45, 7.41], labTeff: 3050, labProtD: 83.1 }], ['ε Индейца', 'K5V', 0.71, 0.76],
     ['Лакайль 9352', 'M1V', 0.474, 0.479], ['Росс 128', 'M4V', 0.198, 0.176], ['Gl 338', 'M0V'], ['Сириус', 'A1V', 1.71, 2.06], ['Арктур', 'K1.5III', 25.4, 1.08],
     ['Бетельгейзе', 'M2Iab', 760, 17], ['Ригель', 'B8Ia', 79, 21], ['Белый карлик', 'DA2']];
   // ползунки: [ключ, подпись, мин, макс, шаг]
@@ -159,6 +159,8 @@
   if ((st.hou | 0) < 66) { st.star.labFanF = 0; st.star.labCarpBlur = 0.17; st.hou = 66; }
   // событие Солнца — 60 с показа ≈ 3 ч (аркада остывает до 1 МК за ≈ 45 мин, затемнение — часы)
   if ((st.hou | 0) < 67) { if (st.name === 'Солнце') st.star.cycle = 60; st.hou = 67; }
+  // выброс Солнца уходит (автор: «давай выброс пусть летит»); у M-карликов извержения по умолчанию запертые — как прежде
+  if ((st.hou | 0) < 68) { if (st.name === 'Солнце') st.star.cmeEscape = 1; st.hou = 68; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
       const cL = corona.carpet ? corona.carpet().L : 0.03;
@@ -384,8 +386,11 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     if (!st.flares && !st.cme) { $('optFlares').click(); $('optCme').click(); }
     evActive = true; t = 0; if (!playing) $('play').click(); evBtn();
     if (star && star.poles && star.poles.length >= 2) { star.group.updateMatrixWorld(); const P0 = star.poles[0].p.clone().normalize(), P1 = star.poles[1].p.clone().normalize(), m = P0.clone().add(P1).normalize(),
-      side = m.clone().cross(P0.clone().sub(P1)).normalize(), loc = m.clone().multiplyScalar(Math.cos(0.44)).addScaledVector(side, Math.sin(0.44)).normalize(), rot = new THREE.Matrix4().extractRotation(star.group.matrixWorld);
-      flyTo(loc.applyMatrix4(rot).normalize(), 2.2, m.applyMatrix4(rot).normalize()); } });
+      side = m.clone().cross(P0.clone().sub(P1)).normalize(), rot = new THREE.Matrix4().extractRotation(star.group.matrixWorld);
+      // с выбросом — сбоку (автор: «давай выброс пусть летит»): область у края, цель — над ней на 1,2 R★, камера под 80° к вертикали области
+      // в 4,5 R★ от цели — в кадре край звезды и путь выброса до ≈ 4 R★; только вспышка — почти сверху, под 25°, в 2,2 R★ от области
+      const ang = st.cme ? 1.4 : 0.44, loc = m.clone().multiplyScalar(Math.cos(ang)).addScaledVector(side, Math.sin(ang)).normalize();
+      flyTo(loc.applyMatrix4(rot).normalize(), st.cme ? 4.5 : 2.2, m.applyMatrix4(rot).normalize().multiplyScalar(st.cme ? 2.2 : 1)); } });
   $('speed').value = st.speed; $('speedO').textContent = st.speed; $('speed').addEventListener('input', e => { st.speed = +e.target.value; $('speedO').textContent = st.speed; save(); });
   $('scrub').addEventListener('input', e => { t = +e.target.value; });
   $('reseed').addEventListener('click', () => { st.seed = (Math.random() * 1e9) | 0; build(); });

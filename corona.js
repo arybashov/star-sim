@@ -536,23 +536,20 @@
     // подгонка по профилю края SDO: с одной плотной частью край ярче середины диска в 13 раз, на снимке — в ≈ 3. uChCut — высота, выше которой
     // касательный столб обоих поглотителей меньше 10⁻⁶ (отсечка по самой толщине, не по числу шкал высот)
     uniform vec2 uChH, uChT0; uniform float uChCut, uTone, uIs;
-    uniform float uEvOn, uEvU, uPixA; uniform vec3 uEvM, uEvAx, uEvSide, uDim; uniform vec4 uRib, uCme; uniform vec2 uCmeRho;
+    uniform float uEvOn, uEvU, uPixA, uCmeE; uniform vec3 uEvM, uEvAx, uEvSide, uDim; uniform vec4 uRib, uCme; uniform vec2 uCmeRho;
     vec2 evSU(vec3 q) { q = normalize(q); return vec2(asin(clamp(dot(q, uEvAx), -1.0, 1.0)), atan(dot(q, uEvSide), dot(q, uEvM))); }
     float evDim(vec3 x) { if (uEvOn < 0.5 || uDim.x <= 0.0) return 1.0; float th = acos(clamp(dot(normalize(x), uEvM), -1.0, 1.0)); return 1.0 - uDim.x * exp(-(th * th) / (uDim.y * uDim.y)); }
     // ленты вспышки: переходный слой у оснований петель, которые греет вспышка (феноменологически: яркость в пике — uRib.z, в долях белого
     // втрое выше — узкое ядро засвечено, как на снимках AIA); ширина — не уже пикселя на поверхности, яркость по ширине сохраняется
-    // лента — длинная (автор: «ленты сделай длинными, а не узлами»): у пары полюсов линия раздела — прямая, ленты — полосы вдоль неё по обе
-    // стороны, на расстоянии d(t), на всю длину области (|u| < U), с концами, отогнутыми наружу J-крюком (у каждой — на своём конце, как у
-    // сдвинутой аркады), лёгким изгибом (шум вдоль ленты, ≈ 0,1 d) и узлами вдоль неё (узор сети). Прежде — запрет слабого поля: в нашем поле
-    // (заряды под поверхностью) сильное поле только у полюсов — ленты выходили узлами; линии равного поля вокруг точечного полюса — кольца
-    float rib1(float x) { return fract(sin(x * 127.1) * 43758.5453); }
-    float ribN(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(rib1(i), rib1(i + 1.0), f) - 0.5; }
-    float ribSide(float s, float uu, float sg, float w) { float sr = uRib.x * (1.0 + 0.6 * smoothstep(0.45, 1.0, sg * uu) + 0.12 * ribN(uu * 6.0 + sg * 3.7));   // крюк на своём конце, изгиб
-      float dd = (sg * s - sr) / w; return exp(-0.5 * dd * dd); }
+    // лента — длинная и прямая (автор: «ленты сделай длинными, а не узлами»; затем — «такие ленты не пойдут — они кривые»: J-крюк и изгиб сняты):
+    // у пары полюсов линия раздела — прямая, ленты — полосы вдоль неё по обе стороны, на расстоянии d(t), на всю длину области (|u| < U), с
+    // узлами вдоль (узор сети). Прежде — запрет слабого поля: в нашем поле (заряды под поверхностью) сильное поле только у полюсов — ленты
+    // выходили узлами; линии равного поля вокруг точечного полюса — кольца
+    float ribSide(float s, float sg, float w) { float dd = (sg * s - uRib.x) / w; return exp(-0.5 * dd * dd); }
     float ribbon(vec3 q, float wpx) { vec2 su = evSU(q); float uu = su.y / max(uEvU, 1e-4), win = 1.0 - smoothstep(0.85, 1.0, abs(uu));
       if (win <= 0.0) return 0.0;
       // обе ленты — суммой (разбор Codex: выбор ленты по знаку s давал шов на линии раздела, когда лента шире расстояния до неё)
-      float w = max(uRib.y, wpx), k = (ribSide(su.x, uu, 1.0, w) + ribSide(su.x, uu, -1.0, w)) * win; if (k < 1e-3) return 0.0;
+      float w = max(uRib.y, wpx), k = (ribSide(su.x, 1.0, w) + ribSide(su.x, -1.0, w)) * win; if (k < 1e-3) return 0.0;
       vec3 qn = normalize(q); vec2 uv = vec2(fract(atan(qn.z, qn.x) / (2.0 * PI) + 1.0), acos(clamp(qn.y, -1.0, 1.0)) / PI);
       float nn = 0.45 + 0.55 * pow(max(texture(uNet2, uv).r * uNetK2, 0.0), 0.6);   // узлы вдоль ленты, лента — непрерывная
       return uRib.z * (uRib.y / w) * k * nn; }
@@ -589,6 +586,10 @@
       if (h0 <= 0.0) return vec4(1e9); h0 = sqrt(h0); float t0 = -b - h0, t3 = -b + h0, h1 = b * b - (q2 - ri * ri); if (h1 <= 0.0) return vec4(t0, t3, t3, t3); h1 = sqrt(h1); return vec4(t0, -b - h1, -b + h1, t3); }
     float ovl(float a0, float a1, float b0, float b1) { return max(0.0, min(a1, b1) - max(a0, b0)); }
     // множитель шага луча [t, t + ds]: доля шага во фронте × (ρ_ф² − 1), в полости × (ρ_п² − 1) — поправка плотности ровно к тому фону, что собирает луч
+    // фронт — купол (автор: «давай выброс пусть летит»; сплошной светящийся шар не похож на выброс): светит верхняя часть оболочки — к низу
+    // плавно гаснет (по направлению середины отрезка от центра пузыря вдоль вертикали области), снизу открыт — как дуга фронта на снимках
+    float cmeCap(vec3 o, vec3 d, float t0, float t1) { if (t1 <= t0) return 0.0; vec3 C = uEvM * (1.0 + uCme.x), pm = o + 0.5 * (t0 + t1) * d; return (t1 - t0) * smoothstep(-0.3, 0.45, dot(normalize(pm - C), uEvM)); }
+    float cmeFront(vec3 o, vec3 d, vec4 T, float ta, float tb) { return cmeCap(o, d, max(ta, T.x), min(tb, T.y)) + cmeCap(o, d, max(ta, T.z), min(tb, T.w)); }
     float cmeF(vec4 T, float t, float ds) { if (T.x > 1e8) return 1.0; float sh = ovl(t, t + ds, T.x, T.y) + ovl(t, t + ds, T.z, T.w), cv = ovl(t, t + ds, T.y, T.z);
       return 1.0 + uCme.z * ((uCmeRho.x * uCmeRho.x - 1.0) * sh + (uCmeRho.y * uCmeRho.y - 1.0) * cv) / max(ds, 1e-6); }
     float furM(float fr, vec3 foot, bool ok) { if (uGas > 0.5) return fr > 0.0 && ok ? mix(1.0, furW(foot), fr) : 1.0; return fr > 0.0 && ok ? fr * furW(foot) : 0.0; }
@@ -601,7 +602,12 @@
       // часть трубок погашена (её свет — в текстуре); линейные яркости складываются, тон и палитра — один раз
       float wt = 0.0, It = 0.0; if (uTubes > 0.5) { vec2 t1; if (sphere(o, d, 1.0, t1) && t1.x > 0.0) { float bi = length(cross(o, d)); wt = uTRamp * smoothstep(uTW0, uTW1, sqrt(max(0.0, 1.0 - bi * bi))); }
         if (wt > 0.0) It = texelFetch(uTA, ivec2(gl_FragCoord.xy), 0).r; }
-      vec2 to; if (!sphere(o, d, uRmax, to)) { o0 = vec4(0.0, 0.0, 0.0, uRaw > 0.5 ? 0.5 : uW); return; }
+      // луч мимо области короны: фронт уходящего выброса — всё равно (иначе за 2,5 R★ он обрезался бы)
+      vec2 to; if (!sphere(o, d, uRmax, to)) { float Ic = 0.0;
+        if (uEvOn > 0.5 && uCme.z > 0.0 && uCmeE > 0.0) { vec4 Tc = cmeTs(o, d); if (Tc.x < 1e8) Ic = uCme.z * uCmeE * cmeFront(o, d, Tc, 0.0, 1e9); }
+        if (uRaw > 0.5) { o0 = vec4(Ic, 0.0, 0.0, 0.5); return; }
+        if (Ic <= 0.0) { o0 = vec4(0.0, 0.0, 0.0, uW); return; }
+        float xc = uTone > 0.5 ? sqrt(clamp(Ic / uIs, 0.0, 1.0)) : log(1.0 + Ic / uI0) / log(1.0 + uIw / uI0); o0 = vec4(gold(clamp(xc, 0.0, 1.0)) * uW, uW); return; }
       float a = max(to.x, 0.0), b = to.y; vec2 ts; bool disk = sphere(o, d, 1.0, ts) && ts.x > 0.0; if (disk) b = min(b, ts.x);   // за диском — не видно
       // мех — над краем (прицельное расстояние больше радиуса); на диске — по выключателю uFurDisk (автор: «а текстуры нет на переднем волуме?»:
       // при газе одним слоем без текстуры диск гладкий — узор оснований вдоль силовых линий даёт ему рисунок; прежде на диске нити тонули
@@ -641,6 +647,9 @@
         I += layerCol(o, d, tHit, uCarpRs, 0, 16, jt) + layerCol(o, d, tHit, uExtRs, 1, 24, jt) + layerCol(o, d, tHit, uMossRs, 2, 12, jt); }
       // 4. ленты: след пикселя поперёк ленты — с ракурсом (у края поверхность видна наискось — след длиннее)
       if (uEvOn > 0.5 && uRib.z > 0.0 && disk) { vec3 qh = normalize(o + ts.x * d); I += ribbon(qh, ts.x * uPixA / max(dot(qh, -d), 0.1)) * chAtt(qh * (1.0 + uMossH), d); }
+      // фронт выброса светит своим веществом (автор: «давай выброс пусть летит»; закон — см. uCmeE в setEvent): к лучу — свечение × путь луча во
+      // фронте-куполе, по всему лучу до диска (разбор Codex: обрезка границей области короны давала шов на 2,5 R★)
+      if (uEvOn > 0.5 && uCme.z > 0.0 && uCmeE > 0.0 && cmT.x < 1e8) I += uCme.z * uCmeE * cmeFront(o, d, cmT, 0.0, disk ? ts.x : 1e9);
       if (uRaw > 0.5) { o0 = vec4(I, disk ? 1.0 : 0.0, 0.0, 1.0); return; }
       // тон (автор: «очень равномерная корона — посмотри на снимки»): как у снимков AIA 171 в стандартной обработке (aia_intscale) — √ яркости,
       // белое — 7,3 медианы середины диска: подгонка палитры — при нашей золотой палитре середина диска той же светлоты, что на снимке SDO
@@ -698,7 +707,7 @@
     const shU = { carp: { value: 500 }, bconc: { value: 3000 }, su: { value: 0.1 } };
     // событие (вспышка и выброс): общие объекты для запекания (аркада, затемнение) и луча (ленты, пузырь, затемнение)
     const evU = { uEvOn: { value: 0 }, uEvTau: { value: 0 }, uEvU: { value: 0.1 }, uEvSepCm: { value: 1e10 }, uEvM: { value: new THREE.Vector3(0, 0, 1) }, uEvAx: { value: new THREE.Vector3(1, 0, 0) }, uEvSide: { value: new THREE.Vector3(0, 1, 0) },
-      uArc: { value: new THREE.Vector4(0, 0, 900, 0) }, uArcTN: { value: new THREE.Vector2(1e7, 1e10) }, uDim: { value: new THREE.Vector3(0, 0.2, 0) }, uRib: { value: new THREE.Vector4(0, 0.004, 0, 0) }, uCme: { value: new THREE.Vector4(0, 0, 0, 0) }, uCmeRho: { value: new THREE.Vector2(1.2, 0.7) }, uPixA: { value: 0.002 } };   // общие для карты нагрева и проходов с разбивкой нагрева
+      uArc: { value: new THREE.Vector4(0, 0, 900, 0) }, uArcTN: { value: new THREE.Vector2(1e7, 1e10) }, uDim: { value: new THREE.Vector3(0, 0.2, 0) }, uRib: { value: new THREE.Vector4(0, 0.004, 0, 0) }, uCme: { value: new THREE.Vector4(0, 0, 0, 0) }, uCmeRho: { value: new THREE.Vector2(1.2, 0.7) }, uPixA: { value: 0.002 }, uCmeE: { value: 0 } };   // общие для карты нагрева и проходов с разбивкой нагрева
     const bu = { uFH: { value: fhTex }, uFHW: { value: 128 }, uFHH: { value: 64 }, uLayer: { value: 0 }, uNr: { value: o.Nr }, uNt: { value: o.Nt }, uNp: { value: o.Np }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uRcm: { value: R }, uGM: { value: G * M }, uTopen: { value: o.Topen }, uNopen: { value: o.nOpen }, uBmin: { value: 1e-3 }, uStepMode: { value: 1 },
       uC: { value: uC }, uNC: { value: 0 }, uDip: { value: 0 }, uDipU: { value: 0 }, uGU: { value: 1 }, uDipM: { value: new THREE.Vector3(0, 1, 0) } };
@@ -1378,7 +1387,7 @@
     const sm01 = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
     function setEvent(e) {
       const U = evU;
-      if (!e || !(e.flare || e.cme) || !e.P0 || !e.P1) { if (evWas) { U.uEvOn.value = 0; U.uRib.value.z = 0; U.uCme.value.z = 0; U.uDim.value.x = 0; U.uArc.value.w = 0; heatDirty = true; briVer++; evWas = false; evKey = ''; } return null; }
+      if (!e || !(e.flare || e.cme) || !e.P0 || !e.P1) { if (evWas) { U.uEvOn.value = 0; U.uRib.value.z = 0; U.uCme.value.z = 0; U.uCmeE.value = 0; U.uDim.value.x = 0; U.uArc.value.w = 0; heatDirty = true; briVer++; evWas = false; evKey = ''; } return null; }
       const alpha = (R / Math.sqrt(2 * G * M / R)) / (e.tDyn || 6), tau = e.t * alpha, cyc = e.cyc || 60, fade = 1 - sm01((e.t / cyc - 0.9) / 0.1);   // конец цикла — плавно
       const P0 = e.P0.clone().normalize(), P1 = e.P1.clone().normalize(), m = P0.clone().add(P1).normalize(), ax = P0.clone().sub(P1).normalize(), side = m.clone().cross(ax).normalize(), sep = P0.distanceTo(P1);
       U.uEvOn.value = 1; U.uEvTau.value = tau; U.uEvM.value.copy(m); U.uEvAx.value.copy(ax); U.uEvSide.value.copy(side); U.uEvU.value = 0.6 * sep; U.uEvSepCm.value = sep * R;
@@ -1392,15 +1401,23 @@
       U.uRib.value.set(dNow, 1.5e8 / R, 3 * (S.Is || 1) * ribEnv, 0);   // x — расстояние ленты от линии раздела сейчас, R★
       // аркада: петли, пересоединённые лентой (см. arcade в шейдере), T₀ = 10 МК, n₀ = 10¹⁰ см⁻³ (испарение: 0,5–3·10¹⁰), доля нитей 0,1 — по виду
       // (на 47-й минуте: 0,03 — +2 % света области, едва видно; 0,3 — +24 %, свет расползается по всей области)
-      U.uArc.value.set(d0, v0, t0, e.flare ? 0.1 * fade : 0);   // та же лента: петля пересоединена, когда лента прошла оба основания U.uArcTN.value.set(1e7, 1e10);
-      // выброс: вершина жгута h(t) — путь из модели звезды; пузырь — центр на высоте h, радиус 0,5h, фронт — 0,15 радиуса; появляется, когда
+      // та же лента: петля пересоединена, когда лента прошла оба основания
+      U.uArc.value.set(d0, v0, t0, e.flare ? 0.1 * fade : 0); U.uArcTN.value.set(1e7, 1e10);
+      // выброс: вершина жгута h(t) — путь из модели звезды; пузырь — центр на высоте h, радиус 0,5h, фронт — 0,08 радиуса; появляется, когда
       // жгут прошёл высоту срыва
       // запертое извержение (разбор Codex): жгут остановился — вещество стекает (fall из пути жгута), пузырь и полость уходят, затемнение
       // восстанавливается вместе с ним; порога срыва нет (жгут нигде не неустойчив) — пузыря нет
       let h = 0, cmeEnv = 0, tE = -1, drain = 0; if (e.cme && e.rope && e.rope.H && (e.rope.hCr > 0 || e.rope.esc)) { h = e.rope.at(e.t); const hc = e.rope.hCr || 0.05;
         drain = e.rope.esc ? 0 : (e.rope.fall ? e.rope.fall(e.t) : 0); cmeEnv = sm01((h - hc) / (0.5 * hc)) * (1 - drain) * fade;
         for (let i = 0; i < e.rope.H.length; i++) if (e.rope.H[i] > hc) { tE = i * e.rope.dt; break; } }
-      U.uCme.value.set(h, 0.5 * h, cmeEnv, 0.075 * h);   // x — высота центра, y — радиус, z — яркость появления, w — толщина фронта U.uCmeRho.value.set(1.2, 0.7);
+      U.uCme.value.set(h, 0.5 * h, cmeEnv, 0.04 * h);   // x — высота центра, y — радиус, z — яркость появления, w — толщина фронта (0,08 радиуса: тонкая
+      // дуга, а не сплошной шар — у тонкой оболочки край по касательной ярче середины в √(2r/δ) ≈ 5 раз)
+      // свечение фронта (на единицу пути): при радиусе пузыря ≤ 0,1 R★ — 5,5 белого на R★; при r_b = 0,1 R★ на касательной к краю ≈ 0,4 белого
+      // (путь во фронте толщиной 0,08 r_b ≈ 0,078 R★; меньше пузырь — тусклее, пропорционально радиусу; подгонка по виду). В 17,1 нм по физике свечение падало бы ∝ (0,1/r_b)⁶ (масса сохраняется, n ∝ r_b⁻³) —
+      // выброс гаснет уже к ≈ 1,3 R★ (так и на снимках AIA). Чтобы видеть уход (автор: «давай выброс пусть летит»), дальше фронт показан как в
+      // коронографе — по рассеянному свету с радиальным фильтром: свечение ∝ (0,1/r_b)^1,5, яркость на касательной ∝ r_b^−0,5 (путь ∝ r_b).
+      // Условность показа, не 17,1 нм
+      U.uCmeE.value = cmeEnv > 0 ? 5.5 * (S.Is || 1) * Math.pow(Math.min(1, 0.1 / Math.max(0.5 * h, 1e-3)), 1.5) : 0; U.uCmeRho.value.set(1.2, 0.7);
       // затемнение: после срыва — за 10 мин до 60 % яркости фона (в среднем ≈ 60 % — Dissauer et al. 2018), восстановление ≈ 3 ч (ядро
       // затемнения держится ≥ 10 ч, края — 1–2 ч: Vanninathan et al. 2018); конус вокруг середины области — 1,2 разноса пары (не меньше 0,12 рад)
       let dim = 0; if (e.cme && tE >= 0) { const a = tau - tE * alpha; dim = a > 0 ? 0.6 * sm01(a / 600) * Math.exp(-Math.max(0, a - 600) / 10800) * (1 - drain) * fade : 0; }
