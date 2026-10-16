@@ -541,13 +541,21 @@
     float evDim(vec3 x) { if (uEvOn < 0.5 || uDim.x <= 0.0) return 1.0; float th = acos(clamp(dot(normalize(x), uEvM), -1.0, 1.0)); return 1.0 - uDim.x * exp(-(th * th) / (uDim.y * uDim.y)); }
     // ленты вспышки: переходный слой у оснований петель, которые греет вспышка (феноменологически: яркость в пике — uRib.z, в долях белого
     // втрое выше — узкое ядро засвечено, как на снимках AIA); ширина — не уже пикселя на поверхности, яркость по ширине сохраняется
-    uniform sampler2D uFH; uniform int uFHW, uFHH; uniform float uBconcH;
-    vec4 fhAt4(int i, int j) { return texelFetch(uFH, ivec2((i % uFHW + uFHW) % uFHW, clamp(j, 0, uFHH - 1)), 0); }
-    float fieldB(vec2 t) { float x = fract(t.x) * float(uFHW) - 0.5, y = t.y * float(uFHH) - 0.5; int i = int(floor(x)), j = int(floor(y)); float fx = x - floor(x), fy = y - floor(y);
-      return max(mix(mix(fhAt4(i, j).b, fhAt4(i + 1, j).b, fx), mix(fhAt4(i, j + 1).b, fhAt4(i + 1, j + 1).b, fx), fy), 0.0) * uBconcH; }
-    float ribbon(vec3 q, float wpx) { vec2 su = evSU(q); float w = max(uRib.y, wpx), ds = (abs(su.x) - uRib.x) / w, k = exp(-0.5 * ds * ds) * (1.0 - smoothstep(0.8 * uEvU, uEvU, abs(su.y)));
-      if (k < 1e-3) return 0.0; vec3 qn = normalize(q); vec2 uv = vec2(fract(atan(qn.z, qn.x) / (2.0 * PI) + 1.0), acos(clamp(qn.y, -1.0, 1.0)) / PI); float g = smoothstep(20.0, 80.0, fieldB(uv)), nn = pow(max(texture(uNet2, uv).r * uNetK2, 0.0), 0.7);
-      return uRib.z * (uRib.y / w) * k * g * nn; }
+    // лента — длинная (автор: «ленты сделай длинными, а не узлами»): у пары полюсов линия раздела — прямая, ленты — полосы вдоль неё по обе
+    // стороны, на расстоянии d(t), на всю длину области (|u| < U), с концами, отогнутыми наружу J-крюком (у каждой — на своём конце, как у
+    // сдвинутой аркады), лёгким изгибом (шум вдоль ленты, ≈ 0,1 d) и узлами вдоль неё (узор сети). Прежде — запрет слабого поля: в нашем поле
+    // (заряды под поверхностью) сильное поле только у полюсов — ленты выходили узлами; линии равного поля вокруг точечного полюса — кольца
+    float rib1(float x) { return fract(sin(x * 127.1) * 43758.5453); }
+    float ribN(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(rib1(i), rib1(i + 1.0), f) - 0.5; }
+    float ribSide(float s, float uu, float sg, float w) { float sr = uRib.x * (1.0 + 0.6 * smoothstep(0.45, 1.0, sg * uu) + 0.12 * ribN(uu * 6.0 + sg * 3.7));   // крюк на своём конце, изгиб
+      float dd = (sg * s - sr) / w; return exp(-0.5 * dd * dd); }
+    float ribbon(vec3 q, float wpx) { vec2 su = evSU(q); float uu = su.y / max(uEvU, 1e-4), win = 1.0 - smoothstep(0.85, 1.0, abs(uu));
+      if (win <= 0.0) return 0.0;
+      // обе ленты — суммой (разбор Codex: выбор ленты по знаку s давал шов на линии раздела, когда лента шире расстояния до неё)
+      float w = max(uRib.y, wpx), k = (ribSide(su.x, uu, 1.0, w) + ribSide(su.x, uu, -1.0, w)) * win; if (k < 1e-3) return 0.0;
+      vec3 qn = normalize(q); vec2 uv = vec2(fract(atan(qn.z, qn.x) / (2.0 * PI) + 1.0), acos(clamp(qn.y, -1.0, 1.0)) / PI);
+      float nn = 0.45 + 0.55 * pow(max(texture(uNet2, uv).r * uNetK2, 0.0), 0.6);   // узлы вдоль ленты, лента — непрерывная
+      return uRib.z * (uRib.y / w) * k * nn; }
     float erfcx(float y) { return 2.0 / (1.7724539 * (y + sqrt(y * y + 1.2732395))); }   // точна при 0 и на бесконечности, при 1 — +5 %
     float chUp1(float r, float mu, float H, float t0) { float X = r / H; return t0 > 0.0 ? t0 * exp(-(r - 1.0) / H) * sqrt(0.5 * PI * X) * erfcx(mu * sqrt(0.5 * X)) : 0.0; }
     float chUp(float r, float mu) { return chUp1(r, mu, uChH.x, uChT0.x) + chUp1(r, mu, uChH.y, uChT0.y); }
@@ -747,7 +755,6 @@
       uI0: { value: 1 }, uIw: { value: 100 }, uW: { value: 1 }, uRaw: { value: 0 }, uSteps: { value: 600 },
       uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
     Object.assign(ru, evU);   // событие: ленты, пузырь выброса, затемнение
-    Object.assign(ru, { uFH: bu.uFH, uFHW: bu.uFHW, uFHH: bu.uFHH, uBconcH: bu.uBconcH });   // карта нагрева — поле под лентами
     const rayMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: RAY_FS, uniforms: ru, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
     const rq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), rayMat), rs = new THREE.Scene(); rq.frustumCulled = false; rs.add(rq);
@@ -1376,13 +1383,13 @@
       const P0 = e.P0.clone().normalize(), P1 = e.P1.clone().normalize(), m = P0.clone().add(P1).normalize(), ax = P0.clone().sub(P1).normalize(), side = m.clone().cross(ax).normalize(), sep = P0.distanceTo(P1);
       U.uEvOn.value = 1; U.uEvTau.value = tau; U.uEvM.value.copy(m); U.uEvAx.value.copy(ax); U.uEvSide.value.copy(side); U.uEvU.value = 0.6 * sep; U.uEvSepCm.value = sep * R;
       // ленты: каждая уходит от линии раздела на d(t) = d₀ + v₀τ₀(1 − e^(−t/τ₀)), τ₀ = 20 мин. В нашем поле (заряды под поверхностью) поток выходит
-      // у самих полюсов, у линии раздела его почти нет: петли через линию раздела опираются на площадки полюсов (основания в 0,7–1,25 полуразноса
-      // от линии). Поэтому лента проходит площадку — от 0,4 до 1,1 полуразноса пары (у этой области ≈ 33 км/с вначале; разбор Codex: 8–33 км/с,
-      // до ≈ 65 у сильных — Hinterreiter et al. 2018); ширина 1,5 тыс. км (на экране — не уже пикселя); яркость — по полю под лентой и узору
-      // сети (рваная лента с узлами), в пике втрое выше белого (узкие ядра засвечены, как на снимках AIA), нарастает за 2 мин, гаснет за ≈ 20 мин
+      // у самих полюсов: петли через линию раздела опираются на площадки полюсов (основания в 0,7–1,25 полуразноса от линии), поэтому лента
+      // проходит от 0,4 до 1,1 полуразноса пары (у этой области ≈ 33 км/с вначале; разбор Codex: 8–33 км/с, до ≈ 65 у сильных — Hinterreiter
+      // et al. 2018); длинная — на всю длину области (см. ribbon в шейдере); ширина 1,5 тыс. км (на экране — не уже пикселя); в пике втрое выше
+      // белого (узкие ядра засвечены, как на снимках AIA), нарастает за 2 мин, гаснет за ≈ 20 мин
       const t0 = 1200, d0 = 0.4 * 0.5 * sep, v0 = 0.7 * 0.5 * sep / t0;
       const ribEnv = e.flare ? sm01(tau / 120) * Math.exp(-tau / 1200) * fade : 0, dNow = d0 + v0 * t0 * (1 - Math.exp(-tau / t0));
-      U.uRib.value.set(dNow, 1.5e8 / R, 3 * (S.Is || 1) * ribEnv, 0);
+      U.uRib.value.set(dNow, 1.5e8 / R, 3 * (S.Is || 1) * ribEnv, 0);   // x — расстояние ленты от линии раздела сейчас, R★
       // аркада: петли, пересоединённые лентой (см. arcade в шейдере), T₀ = 10 МК, n₀ = 10¹⁰ см⁻³ (испарение: 0,5–3·10¹⁰), доля нитей 0,1 — по виду
       // (на 47-й минуте: 0,03 — +2 % света области, едва видно; 0,3 — +24 %, свет расползается по всей области)
       U.uArc.value.set(d0, v0, t0, e.flare ? 0.1 * fade : 0);   // та же лента: петля пересоединена, когда лента прошла оба основания U.uArcTN.value.set(1e7, 1e10);
