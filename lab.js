@@ -308,6 +308,16 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   let star = null, sn = null, t = 0, simT = 0, lastStats = 0, playing = true, last = performance.now(), corona = null, coronaCal = false, coronaCalT = 0;   // simT — часы симуляции (пауза их останавливает)
   const cls = () => SM.classParams(st.sp, st.comp);
   const rSunEff = () => st.R || cls().rSun, mSunEff = () => st.M || cls().mSun;   // радиус и масса: примера или по классу
+  // газ над открытым полем (автор: «проксима с лысиной» — над полюсом наклонённого диполя корональная дыра была пустой: у всех звёзд
+  // n = 10⁸ см⁻³ и T = 1 МК, а закрытая корона Проксимы в десятки раз плотнее — после подстройки яркости дыра — чернота). Теперь — по тем же
+  // законам, что и петли (RTV — солнечно-нормированное приближение нижней короны: у открытых трубок энергия уходит ещё и в ветер), от
+  // среднего достигнутого потока нагрева F_H = L_H/4πR² (разбор Codex: не цель — ε ограничен единицей, нагрев можно выключить) и размера
+  // звезды (длина ∝ R): T ∝ (F_H·L)^{2/7}, n ∝ F_H^{4/7}·L^{−3/7}; у Солнца (F_H = 3,29·10⁵) — как было: 10⁸ см⁻³, 1 МК; без нагрева —
+  // открытая корона почти пустая, как и закрытая
+  const openCorona = () => { const SSo = star.surfaceState && star.surfaceState(), st0 = SSo && SSo.stats(), e0 = effStar(), LH = st0 && st0.LH > 0 ? st0.LH : (e0.labEtaH > 0 ? e0.labLH || 0 : 0),   // при сборке нагрев ещё не посчитан — цель (если нагрев включён)
+      Rcm = star.phys.rKm * 1e5, r = Rcm / 6.957e10;
+    const f = LH / (4 * Math.PI * Rcm * Rcm) / 3.288e5; if (!(f > 1e-6)) return { Topen: 1e6, nOpen: 1e5 };
+    return { Topen: 1e6 * Math.pow(f * r, 2 / 7), nOpen: 1e8 * Math.pow(f, 4 / 7) * Math.pow(r, -3 / 7) }; };
   const effStar = () => Object.assign({}, SM.DEFAULTS, cls().overrides, st.star);
   const effSn = () => Object.assign({}, SM.SN_DEFAULTS, st.sn);
   function build() {
@@ -343,7 +353,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     // граница объёма — поверхность источника поля (заряды-изображения построены на ней); без изображений — 2,5 R★
     if (st.euv !== false && window.M31Corona && SSo && st.mode !== 'sn') {
       if (!M31Corona.supported(renderer)) console.warn('корона: нужен WebGL2 с EXT_color_buffer_float — ультрафиолет выключен');
-      else corona = M31Corona.create(THREE, renderer, Object.assign({ R: star.phys.rKm * 1e5, M: star.phys.mSun * 1.989e33, rMax: star.params.rSS > 1 ? star.params.rSS : 2.5, gas: st.euvGas === false ? 0 : 1 }, euvGrid())); }
+      else corona = M31Corona.create(THREE, renderer, Object.assign({ R: star.phys.rKm * 1e5, M: star.phys.mSun * 1.989e33, ...openCorona(), rMax: star.params.rSS > 1 ? star.params.rSS : 2.5, gas: st.euvGas === false ? 0 : 1 }, euvGrid())); }
     if (corona) { if (corona.setCarpet) corona.setCarpet(st.euvCarpet === true); applyChrom(); if (corona.setTone) corona.setTone(st.euvTone !== 'log'); corona.uniforms.uSurfOn.value = st.euvSurf === true ? 1 : 0; corona.uniforms.uFurDisk.value = st.euvFurDisk === true ? 1 : 0; corona.uniforms.uCubic.value = st.euvCubic === false ? 0 : 1; if (corona.setHydro) corona.setHydro(false); if (corona.setTubes) corona.setTubes(st.euvTubes === true); if (corona.setPoles) corona.setPoles(star.polesView ? star.polesView() : star.poles); const [C, fh] = coronaInputs(); corona.bake(C, fh); if (corona.setHydro) corona.setHydro(hydroOn); applyDbg(); coronaCal = true; coronaCalT = 0; coronaClk = coronaLiveClk = star.surfClockView ? star.surfClockView() : star.surfClock ? star.surfClock() : 0; }   // часы показа (разбор Codex)
     applyDbg();   // без короны (ультрафиолет выключен) поверхность не держится (разбор Codex)
     euvLabel();
