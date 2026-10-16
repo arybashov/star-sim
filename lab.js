@@ -191,17 +191,28 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   const orbit = { yaw: 0.35, pitch: 0.12, dist: 6.2, T: new THREE.Vector3() };
   let drag = null;
   renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
-  renderer.domElement.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch, pan: e.button === 2 || e.shiftKey, T: orbit.T.clone() }; renderer.domElement.setPointerCapture(e.pointerId); });
-  renderer.domElement.addEventListener('pointermove', e => { if (!drag) return;
+  // полёт камеры к событию (автор: «где его искать то?»): по «▶ начать» камера плавно (2 с, без скачка) поворачивается к якорной области и
+  // наводится на неё: цель камеры — середина области, камера — в 2,2 R★ от неё под 25° вдоль линии раздела (петли аркады и подъём выброса —
+  // чуть сбоку); тянуть или колесо — полёт прерывается
+  let camFly = null;
+  function flyTo(w, dist, T1) { const yaw = Math.atan2(w.x, w.z), pitch = Math.max(-1.4, Math.min(1.4, Math.asin(Math.max(-1, Math.min(1, w.y))))); let dy = yaw - orbit.yaw; dy -= 2 * Math.PI * Math.round(dy / (2 * Math.PI));
+    drag = null;   // полёт забирает камеру у перетаскивания (разбор Codex: иначе следующее движение мыши возвращало старые углы)
+    camFly = { k: 0, dur: 2000, y0: orbit.yaw, p0: orbit.pitch, d0: orbit.dist, T0: orbit.T.clone(), T1: T1 ? T1.clone() : new THREE.Vector3(), dy, p1: pitch, d1: dist }; }
+  renderer.domElement.addEventListener('pointerdown', e => { if (drag) return; camFly = null; drag = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: orbit.yaw, pitch: orbit.pitch, pan: e.button === 2 || e.shiftKey, T: orbit.T.clone() }; renderer.domElement.setPointerCapture(e.pointerId); });
+  renderer.domElement.addEventListener('pointermove', e => { if (!drag || e.pointerId !== drag.id) return;
     if (drag.pan) { const k = orbit.dist * 2 * Math.tan(cam.fov * Math.PI / 360) / view.clientHeight, rt = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
-      orbit.T.copy(drag.T).addScaledVector(rt, -(e.clientX - drag.x) * k).addScaledVector(up, (e.clientY - drag.y) * k); return; }
+      // сдвиг — пошагово от прошлого положения мыши (разбор Codex: от точки нажатия смена дистанции колесом посреди сдвига перемасштабировала весь путь — скачок)
+      orbit.T.addScaledVector(rt, -(e.clientX - (drag.px ?? drag.x)) * k).addScaledVector(up, (e.clientY - (drag.py ?? drag.y)) * k); drag.px = e.clientX; drag.py = e.clientY; return; }
     orbit.yaw = drag.yaw - (e.clientX - drag.x) * 0.006; orbit.pitch = Math.max(-1.5, Math.min(1.5, drag.pitch + (e.clientY - drag.y) * 0.006)); });
-  renderer.domElement.addEventListener('pointerup', () => { drag = null; });
+  renderer.domElement.addEventListener('pointerup', e => { if (drag && e.pointerId === drag.id) drag = null; });   // одно перетаскивание — один указатель (разбор Codex)
+  for (const ev of ['pointercancel', 'lostpointercapture']) renderer.domElement.addEventListener(ev, e => { if (drag && e.pointerId === drag.id) drag = null; });   // потерянный указатель — без «залипшего» перетаскивания (разбор Codex)
   // ближе 3 R★ от центра звезды не подлетаем (автор, 15.10: «не надо подлетать к звезде слишком близко — все детали не прорисуем»;
   // реестр интерфейса, п. 29): диск — около 80 % высоты кадра, кромка с мехом в кадре
   const STAR_DMIN = 3;
-  renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(st.mode === 'sn' ? 0.05 : STAR_DMIN, Math.min(400, orbit.dist * Math.exp(e.deltaY * 0.0012))); }, { passive: false });
-  renderer.domElement.addEventListener('dblclick', () => { Object.assign(orbit, { yaw: 0.35, pitch: 0.12, dist: st.mode === 'sn' ? 45 : 6.2 }); orbit.T.set(0, 0, 0); });
+  renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); camFly = null; const lo = st.mode === 'sn' ? 0.05 : Math.min(orbit.dist, Math.max(0.3, STAR_DMIN - orbit.T.length())); orbit.dist = Math.max(lo, Math.min(400, orbit.dist * Math.exp(e.deltaY * 0.0012))); }, { passive: false });   // цель у поверхности — минимум от неё; уже ближе — не отбрасывает (дальше — мягкая поправка; разбор Codex)
+  // сброс вида — тоже полётом (правило: камера без скачков)
+  const orbitDir = (yaw, pitch) => new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+  renderer.domElement.addEventListener('dblclick', () => { flyTo(orbitDir(0.35, 0.12), st.mode === 'sn' ? 45 : 6.2, new THREE.Vector3()); });
   // ---- глоу (решение автора 14.10.2026 — на стенде; в игре по реестру интерфейса п. 22 его нет): кадр — в текстуру с плавающей точкой,
   // яркое выше порога — вниз по четырём масштабам (½…1/16) с размытием Гаусса на каждом, сумма — поверх кадра
   const glow = (() => {
@@ -361,7 +372,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   $('euvS').value = Math.log2(euvGrid().surfW); $('euvS').addEventListener('input', e => { st.euvS = +e.target.value; euvLabel(); save(); clearTimeout(euvT); euvT = setTimeout(() => { buildCorona(); }, 250); });
   document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
     st.mode = b.dataset.mode; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-    orbit.dist = st.mode === 'sn' ? 45 : 6.2; t = 0; evActive = false; evBtn(); groups(); build(); }));   // смена режима — событие кончилось (разбор Codex)
+    flyTo(orbitDir(orbit.yaw, orbit.pitch), st.mode === 'sn' ? 45 : 6.2, new THREE.Vector3()); t = 0; evActive = false; evBtn(); groups(); build(); }));   // смена режима — полётом, к центру   // смена режима — событие кончилось (разбор Codex)
   $('play').addEventListener('click', () => { playing = !playing; $('play').textContent = playing ? 'Пауза' : 'Пуск'; });
   // событие — по кнопке (автор: «надо кнопку, по которой начинается»): идёт с нуля один раз, на это время поверхность стоит; выключатели
   // «вспышка» и «выброс» — что показать в событии (ни одного — кнопка включает оба); ещё раз — остановить
@@ -371,7 +382,10 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   $('evStart').addEventListener('click', () => {
     if (evActive) { evActive = false; t = 0; evBtn(); return; }
     if (!st.flares && !st.cme) { $('optFlares').click(); $('optCme').click(); }
-    evActive = true; t = 0; if (!playing) $('play').click(); evBtn(); });
+    evActive = true; t = 0; if (!playing) $('play').click(); evBtn();
+    if (star && star.poles && star.poles.length >= 2) { star.group.updateMatrixWorld(); const P0 = star.poles[0].p.clone().normalize(), P1 = star.poles[1].p.clone().normalize(), m = P0.clone().add(P1).normalize(),
+      side = m.clone().cross(P0.clone().sub(P1)).normalize(), loc = m.clone().multiplyScalar(Math.cos(0.44)).addScaledVector(side, Math.sin(0.44)).normalize(), rot = new THREE.Matrix4().extractRotation(star.group.matrixWorld);
+      flyTo(loc.applyMatrix4(rot).normalize(), 2.2, m.applyMatrix4(rot).normalize()); } });
   $('speed').value = st.speed; $('speedO').textContent = st.speed; $('speed').addEventListener('input', e => { st.speed = +e.target.value; $('speedO').textContent = st.speed; save(); });
   $('scrub').addEventListener('input', e => { t = +e.target.value; });
   $('reseed').addEventListener('click', () => { st.seed = (Math.random() * 1e9) | 0; build(); });
@@ -450,9 +464,17 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     if (playing) { if (!evOn) simT += dtPh * st.speed; $('scrub').value = t; }
     $('scrubO').textContent = t.toFixed(1); $('scrub').max = cyc;
     const px = view.clientHeight / (2 * Math.tan(cam.fov * Math.PI / 360));
-    // камера — до обновления звезды (уровень детализации берёт её положение)
+    // камера — до обновления звезды (уровень детализации берёт её положение); полёт к событию — плавно (smoothstep), дистанция — по логарифму
+    // полёт — по времени кадров (шаг ≤ 0,1 с): после свёрнутой вкладки — не перескок
+    if (camFly) { camFly.k = Math.min(1, camFly.k + dt * 1000 / camFly.dur); const k = camFly.k, s2 = k * k * (3 - 2 * k); orbit.yaw = camFly.y0 + camFly.dy * s2; orbit.pitch = camFly.p0 + (camFly.p1 - camFly.p0) * s2;
+      orbit.dist = camFly.d0 * Math.pow(camFly.d1 / camFly.d0, s2); orbit.T.copy(camFly.T0).lerp(camFly.T1, s2); if (k >= 1) camFly = null; }
+    // не ближе 3 R★ к центру — мягко и через состояние орбиты (разбор Codex: жёсткая поправка одной камеры давала скачки при старте и
+    // прерывании полёта): расстояние до цели плавно доводится до наименьшего допустимого по текущему направлению; во время полёта — нет
+    if (st.mode !== 'sn' && !camFly) { const dv = orbitDir(orbit.yaw, orbit.pitch), cp = orbit.T.clone().addScaledVector(dv, orbit.dist);
+      if (cp.length() < STAR_DMIN) { const td = orbit.T.dot(dv), sq = Math.sqrt(Math.max(0, td * td - orbit.T.lengthSq() + STAR_DMIN * STAR_DMIN)), r1 = -td - sq, r2 = -td + sq;   // только если камера внутри 3 R★
+        const tgt = [r1, r2].filter(x => x > 0).sort((a, b) => Math.abs(a - orbit.dist) - Math.abs(b - orbit.dist))[0];   // к ближайшей допустимой точке на линии взгляда
+        if (tgt != null) orbit.dist += (tgt - orbit.dist) * Math.min(1, dt * 6); } }
     { const cp = Math.cos(orbit.pitch); cam.position.set(Math.sin(orbit.yaw) * cp * orbit.dist, Math.sin(orbit.pitch) * orbit.dist, Math.cos(orbit.yaw) * cp * orbit.dist).add(orbit.T);
-      if (st.mode !== 'sn' && cam.position.length() < STAR_DMIN) cam.position.setLength(STAR_DMIN);   // и при сдвиге цели — не ближе 3 R★ к центру
       cam.lookAt(orbit.T); cam.updateMatrixWorld(); }
     const tu0 = performance.now();
     const f = star.update(st.mode === 'sn' ? 99 : t, simT, px, 1, 1, { cam: star.group.worldToLocal(cam.position.clone()), realDt: dt });
