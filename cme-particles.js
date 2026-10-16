@@ -11,8 +11,8 @@
 // общим для участка толчком 20–60 км/с (и дроблением ±5 км/с); упавшее на поверхность гаснет коротким свечением удара (07.06.2011).
 // Запертое извержение (жгут остановился): освобождение — по расписанию стока модели (tStall, tFall), почти всё стекает по ногам.
 // Каждая частица — сгусток: «масса» поглощения M (единицы τ·площадь, Σ = τ₀·площадь волокна — средняя τ волокна τ₀), размер σ
-// (растёт с сечением — пик τ ∝ σ⁻²), свечение краёв E ∝ M·σ/σ₀ (переходный слой на границе холодной нити — свечение ∝ площади
-// границы; яркость пятна ∝ 1/σ — нити бледнеют, расширяясь, но медленнее, чем темнеют).
+// (растёт с сечением — пик τ ∝ σ⁻²), свечение E: тёплая оболочка холодной нити (∝ M·σ/σ₀) и нагретый газ (нагрев по времени —
+// см. ниже: связные области греются после срыва до 0,6–2,5 МК, перестают поглощать и светят в 171, затем остывают).
 // Детерминированно: состояние — функция времени цикла (шаг 0,01 с, контрольные точки каждые 2 с: прокрутка назад — от ближайшей).
 (function (root) {
   'use strict';
@@ -28,6 +28,7 @@
     // g0, kms — тяготение и 1 км/с в единицах R★ и секунд показа; alpha — физ. секунд на секунду показа
     const P0 = nrm(v3(o.P0)), P1 = nrm(v3(o.P1)), rope = o.rope, g0 = o.g0, kms = o.kms, alpha = o.alpha || 188;
     const tau0 = o.tau0 != null ? o.tau0 : 2, e0 = o.e0 != null ? o.e0 : 0.1, fFall = o.fFall != null ? o.fFall : 0.5, N = Math.max(100, Math.round(o.N || 8000)), seed = (o.seed || 1) | 0;
+    const f1 = o.hotF != null ? o.hotF : 0.5, eH = o.hotE != null ? o.hotE : 4;   // нагрев: доля областей, начавших греться к подъёму 0,5 R★; яркость нагретого
     const m = nrm([P0[0] + P1[0], P0[1] + P1[1], P0[2] + P1[2]]), ax = nrm([P0[0] - P1[0], P0[1] - P1[1], P0[2] - P1[2]]), side = nrm(crs(m, ax));
     const sep = Math.hypot(P0[0] - P1[0], P0[1] - P1[1], P0[2] - P1[2]), L = 0.6 * sep;
     // путь вершины: линейно между отсчётами; у уходящего после остановки отсчётов (h > 6) — последней скоростью
@@ -39,7 +40,9 @@
     let tEr = -1; for (let i = 0; i < H.length; i++) if (H[i] > hCr) { tEr = i * rdt; break; }
     const confined = !rope.esc && rope.tStall >= 0, tStall = rope.tStall, tFall = rope.tFall || 3, Tw = 900 / alpha;   // окно отрыва уходящего — 15 мин физ.
     const R = mulberry(seed ^ 0x51ed), asym = (R() < 0.5 ? -1 : 1) * (0.15 + 0.2 * R());   // вершина смещена к одной ноге (несимметричный подъём)
-    const a0 = o.a0 || 0.01, q = o.q || 0.08, Twist = 1.2;
+    // сечение волокна и сгусток — в долях разноса пары (автор: «надо к остальным звёздам всё подключать»): у Солнца разнос ≈ 0,16 R★ →
+    // a₀ ≈ 0,01 R★ (≈ 7 тыс. км), σ₀ = 0,35·a₀ — как было подобрано; у других звёзд волокно соразмерно своей области
+    const a0 = o.a0 || 0.063 * sep, q = o.q || 0.08, Twist = 1.2;
     const lift = t => Math.max(0, hAt(t) - hi);
     // ось жгута и сечение (s ∈ [−1, 1]; ноги — на поверхности: начальная высота h_i·(1 − s⁴), подъём ∝ (1 − s²))
     function axisAt(s, t, out) { const u = nrm([m[0] + s * L * side[0], m[1] + s * L * side[1], m[2] + s * L * side[2]]), f = 1 - s * s;
@@ -47,7 +50,7 @@
     const aAt = (s, t) => a0 * (0.4 + 0.6 * (1 - s * s)) + q * lift(t) * (1 - s * s);
     // пучки: 5 неодинаковых, в каждом 2–4 нити; у нити — фаза и доля радиуса; вес массы пучка — неравный
     const strands = []; { const NB = 5; for (let b = 0; b < NB; b++) { const pb = 2 * Math.PI * R(), rb = 0.15 + 0.7 * R(), wb = 0.08 + 0.2 * R(), mb = 0.5 + R(), ns = 2 + Math.floor(3 * R());
-      for (let k = 0; k < ns; k++) strands.push({ ph: pb + (R() - 0.5) * wb * 4, rho: Math.min(1, Math.max(0.05, rb + (R() - 0.5) * wb)), w: mb / ns, gap: R() * 100 }); } }
+      for (let k = 0; k < ns; k++) strands.push({ ph: pb + (R() - 0.5) * wb * 4, rho: Math.min(1, Math.max(0.05, rb + (R() - 0.5) * wb)), w: mb / ns, gap: R() * 100, b }); } }
     const NS = strands.length, A = [0, 0, 0], B = [0, 0, 0], C = [0, 0, 0];
     // точка нити k при s, t (+ смещение частицы в сечении, доли a)
     function strandAt(k, s, t, dx, dy, out) { s = Math.max(-1, Math.min(1, s)); axisAt(s, t, out); const e = 1e-3, sa = Math.max(-1, s - e), sb = Math.min(1, s + e); axisAt(sa, t, A); axisAt(sb, t, B);
@@ -75,7 +78,44 @@
     // масса: средняя τ волокна τ₀ на площади 2L × 2a₀ (вид сверху)
     // сгусток растёт медленнее сечения жгута (σ ∝ a^0,35): при подъёме нити расходятся и видны по отдельности (31.08.2012); при σ ∝ a
     // (самоподобно) пучки сливались в одну гладкую светящуюся трубку
-    const sig0 = o.sig0 || 0.0035, GX = 0.35, Mi = tau0 * (2 * L) * (2 * a0) / N;
+    const sig0 = o.sig0 || 0.35 * a0, GX = 0.35, Mi = tau0 * (2 * L) * (2 * a0) / N;
+    // нагрев по времени (автор: «давай нагрев по времени»; замысел — разбор Codex). Связные области нити (Δs ≈ 0,45, общие для нитей пучка;
+    // значения в узлах — линейно вдоль s, без «конфетти») начинают греться, когда доля начавших нагрев f_h(t) = f1·(0,2 + 0,8·S(подъём/0,5 R★))
+    // превысит их порог (после срыва). T растёт за τ_h = 300–1200 физ. с до T_max (70 % — 0,6–1 МК, в полосе 171; 30 % — 1,3–2,5 МК: уходят
+    // выше и гаснут), держится 900–2700 с (нагрев продолжается), затем остывает адиабатически T ∝ ρ^{2/3} (разбор Codex: без этого постоянное T_max —
+    // непрерывный нагрев; при остывании сразу после разогрева в полосу 171 почти никто не попадал — жгут расширяется быстрее). Часть
+    // областей одной ноги тёплая ещё до срыва (31.08.2012 — светлые нити ноги до извержения: Lörinčík et al. 2019). Поглощение 171 держится до
+    // ≈ 10⁵ K (He II; Landi & Reale 2013): a = 1 − S(4,8; 5,3; lg T). Свечение нагретого — eH·M·ν·R₁₇₁(T): ν — плотность участка жгута
+    // относительно начальной (сечение² × длина; мера эмиссии ∝ M·ρ), R₁₇₁ — гаусс по lg T: 5,9 ± 0,15. Масштабы — постановка по виду
+    // (Landi et al. 2010: многотемпературное вещество 10⁵–10⁶ K), не измеренная доля
+    const RH = mulberry(seed ^ 0x7ea7), HL = 0.45, NHN = Math.ceil(2 / HL) + 1, NBd = strands.reduce((a, q) => Math.max(a, q.b + 1), 0), preSide = asym > 0 ? 1 : -1;
+    const hn = []; for (let b = 0; b < NBd; b++) for (let k = 0; k < NHN; k++) { const sk0 = -1 + k * HL, warm = RH() < 0.7;
+      hn.push({ u: RH(), tau: (300 + 900 * RH()) / alpha, tm: warm ? 5.8 + 0.2 * RH() : 6.1 + 0.3 * RH(), pre: sk0 * preSide > 0.4 && RH() < 0.5 ? 1 : 0, hold: (900 + 1800 * RH()) / alpha }); }
+    const fhT = new Float32Array(H.length); { let mx = 0; for (let i = 0; i < H.length; i++) { if (tEr >= 0 && i * rdt >= tEr) { const x = Math.min(1, Math.max(0, (H[i] - hi) / 0.5)); mx = Math.max(mx, f1 * (0.2 + 0.8 * x * x * (3 - 2 * x))); } fhT[i] = mx; } }
+    const thOf = u => { if (f1 <= 0 || tEr < 0 || fhT[fhT.length - 1] < u) return 1e9;   // 0 — без нагрева (разбор Codex)
+      let a = 0, b = fhT.length - 1; while (a < b) { const md = (a + b) >> 1; if (fhT[md] >= u) b = md; else a = md + 1; } return Math.max(tEr, a * rdt); };
+    const hTau = new Float32Array(N), hTm = new Float32Array(N), hPre = new Float32Array(N), hTh = new Float32Array(N), hHold = new Float32Array(N);
+    for (let i = 0; i < N; i++) { const b = strands[sk[i]].b, x = (ss[i] + 1) / HL, k0 = Math.min(NHN - 2, Math.floor(x)), f = x - k0, A0 = hn[b * NHN + k0], A1 = hn[b * NHN + k0 + 1];
+      hTau[i] = A0.tau + (A1.tau - A0.tau) * f; hHold[i] = A0.hold + (A1.hold - A0.hold) * f; hTm[i] = A0.tm + (A1.tm - A0.tm) * f; hPre[i] = f1 > 0 ? A0.pre + (A1.pre - A0.pre) * f : 0; hTh[i] = thOf(A0.u + (A1.u - A0.u) * f); }
+    // плотность нити относительно начальной: (w₀/w)² × (ℓ₀/ℓ); ширина нити w ∝ a^0,35 (как σ сгустка: нити тоньше жгута и расширяются
+    // медленнее его — при плотности по сечению всего жгута, ∝ a⁻², нагретые нити гасли к 0,2 R★), ℓ — длина оси на единицу s
+    const lenAx0 = (s, t) => { s = Math.max(-0.999, Math.min(0.999, s)); axisAt(s - 1e-3, t, A); axisAt(s + 1e-3, t, B); return Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]) / 2e-3; };
+    const LT = new Float32Array(65); let LTt = NaN;   // таблица длины оси на время LTt (кадр): 65 узлов по s вместо двух точек оси на частицу
+    const lenAx = (s, t) => { if (t !== LTt) return lenAx0(s, t); const x = (Math.max(-1, Math.min(1, s)) + 1) * 32, k = Math.min(63, Math.floor(x)); return LT[k] + (LT[k + 1] - LT[k]) * (x - k); };
+    const lenTab = t => { if (t === LTt) return; for (let k = 0; k <= 64; k++) LT[k] = lenAx0(-1 + k / 32, t); LTt = t; };
+    const nuAx = (s, t, l0) => { const r = Math.pow(aAt(s, 0) / aAt(s, t), GX); return r * r * (l0 != null ? l0 : lenAx(s, 0)) / Math.max(lenAx(s, t), 1e-9); };
+    // кэш: длина оси при t = 0 у исходного места частицы; плотность на конце нагрева (не зависит от момента запроса — разбор см. nuOf)
+    const L0 = new Float32Array(N), nuTe = new Float32Array(N).fill(NaN); for (let i = 0; i < N; i++) L0[i] = lenAx0(ss[i], 0);
+    // плотность частицы в момент t (летящая — с момента отрыва сгусток расширяется: ν ∝ (1 + 0,05·Δt)⁻³, как σ)
+    // у стекающих — по исходному месту на нити (разбор Codex: по текущему s кэш конца нагрева зависел от истории прокрутки)
+    function nuOf(i, t) { if (S.st[i] === 2 && t > S.trel[i]) { const g = 1 + 0.05 * (t - S.trel[i]); return nuAx(ss[i], S.trel[i], L0[i]) / (g * g * g); } return nuAx(ss[i], t, L0[i]); }
+    const sst = (a, b, x) => { const y = Math.min(1, Math.max(0, (x - a) / (b - a))); return y * y * (3 - 2 * y); };
+    function logTOf(i, t, nuNow) { const base = 4 + 1.7 * sst(0, 1, hPre[i]), th = hTh[i]; if (t <= th) return base; const tm = Math.max(hTm[i], base), x = (t - th) / hTau[i];
+      if (x < 1) return base + (tm - base) * x * x * (3 - 2 * x);
+      // нагрев держится ещё 900–2700 физ. с (постоянная T — это продолжающийся нагрев), затем — адиабатическое остывание
+      const te = th + hTau[i] + hHold[i]; if (t <= te) return tm;
+      if (nuTe[i] !== nuTe[i]) nuTe[i] = nuOf(i, te);   // при t ≥ конца нагрева ответ один и тот же (момент отрыва детерминирован)
+      return Math.max(4, tm + (2 / 3) * Math.log10(Math.max(1e-9, nuNow) / Math.max(nuTe[i], 1e-9))); }
     // состояние: 0 — на нити, 1 — стекает по нити (s, ṡ), 2 — летит (x, v), 3 — упала (время и место удара)
     const S = { tc: 0, st: new Uint8Array(N), x: new Float32Array(3 * N), v: new Float32Array(3 * N), s: new Float32Array(N), sd: new Float32Array(N), tImp: new Float32Array(N), sr: new Float32Array(N), trel: new Float32Array(N) };
     const ck = new Map(); const snap = () => ({ tc: S.tc, st: S.st.slice(), x: S.x.slice(), v: S.v.slice(), s: S.s.slice(), sd: S.sd.slice(), tImp: S.tImp.slice(), sr: S.sr.slice(), trel: S.trel.slice() });
@@ -93,7 +133,7 @@
       for (let i = 0; i < N; i++) { let st = S.st[i];
         if (st === 0) { const g = seg[segOf(i)]; if (g.rel && g.tr <= t1) { release(i, t1); } continue; }
         if (st === 1) { // сток по нити: ускорение вдоль касательной от тяжести, положение — на движущейся нити
-          const k = sk[i], s = S.s[i]; strandAt(k, s + 1e-3, t1, dxy[2 * i], dxy[2 * i + 1], P); strandAt(k, s - 1e-3, t1, dxy[2 * i], dxy[2 * i + 1], Q);
+          const k = sk[i], s = S.s[i]; axisAt(Math.min(1, s + 1e-3), t1, P); axisAt(Math.max(-1, s - 1e-3), t1, Q);   // касательная — по оси жгута (дешевле нити втрое)
           const tg = [P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]], dl = Math.hypot(tg[0], tg[1], tg[2]) / 2e-3, mid = [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2, (P[2] + Q[2]) / 2], r = Math.hypot(mid[0], mid[1], mid[2]);
           const at = -g0 / (r * r) * (mid[0] * tg[0] + mid[1] * tg[1] + mid[2] * tg[2]) / (r * Math.max(Math.hypot(tg[0], tg[1], tg[2]), 1e-12));
           S.sd[i] += at / Math.max(dl, 1e-6) * DT; S.s[i] = s + S.sd[i] * DT;
@@ -112,7 +152,7 @@
       while (S.tc + DT <= t + 1e-9) step(); }
     // вид в момент t: P4 — (x, y, z, σ), Q4 — (M, E, σ_e, 0); только видимые частицы
     const P4 = new Float32Array(4 * N), Q4 = new Float32Array(4 * N);
-    function at(t, fade) { advance(t); fade = fade == null ? 1 : fade; const env = fade * Math.min(1, Math.max(0, t / 0.8)), dtc = t - S.tc; let n = 0;
+    function at(t, fade) { advance(t); lenTab(t); fade = fade == null ? 1 : fade; const env = fade * Math.min(1, Math.max(0, t / 0.8)), dtc = t - S.tc; let n = 0;
       if (env <= 0) return { n: 0, P: P4, Q: Q4 };
       for (let i = 0; i < N; i++) { const st = S.st[i]; let sg, x, y, z, M = Mi * env, E;
         if (st === 0) { strandAt(sk[i], ss[i], t, dxy[2 * i], dxy[2 * i + 1], C); x = C[0]; y = C[1]; z = C[2]; sg = sig0 * ksz[i] * Math.pow(aAt(ss[i], t) / aAt(ss[i], 0), GX); }
@@ -122,10 +162,14 @@
           // удар: вещество нагрето — не поглощает, коротко светит
           E = 3 * e0 * M * Math.exp(-a / 0.25); M = 0; P4.set([x, y, z, sg], 4 * n); Q4.set([0, E, sg, 0], 4 * n); n++; continue; }
         const r = Math.hypot(x, y, z); if (r > 60) continue;
-        E = e0 * M * (sg / (sig0 * ksz[i])) * seg[segOf(i)].hot;   // свечение оболочки ∝ её площади (∝ σ): яркость пятна ∝ 1/σ; участки — светлые и тёмные
-        P4[4 * n] = x; P4[4 * n + 1] = y; P4[4 * n + 2] = z; P4[4 * n + 3] = sg; Q4[4 * n] = M; Q4[4 * n + 1] = E; Q4[4 * n + 2] = 1.7 * sg; Q4[4 * n + 3] = 0; n++; }
+        // нагрев: поглощение — доля a₁₇₁, свечение — тёплая оболочка холодной нити (условно, ∝ σ) + нагретый газ (∝ ν·R₁₇₁); нагретое светит
+        // своим объёмом — пятно свечения сжимается к σ (разбор Codex: 1,7σ снижало пик в 2,9 раза)
+        const nu = nuOf(i, t), lt = logTOf(i, t, nu), a171 = 1 - sst(4.8, 5.3, lt), zt = (lt - 5.9) / 0.15, R171 = Math.exp(-0.5 * zt * zt);
+        E = e0 * M * (sg / (sig0 * ksz[i])) * a171 + eH * M * nu * R171;
+        P4[4 * n] = x; P4[4 * n + 1] = y; P4[4 * n + 2] = z; P4[4 * n + 3] = sg; Q4[4 * n] = M * a171; Q4[4 * n + 1] = E; Q4[4 * n + 2] = sg * (1 + 0.7 * a171); Q4[4 * n + 3] = lt; n++; }
       return { n, P: P4, Q: Q4 }; }
-    function stats() { const c = [0, 0, 0, 0]; for (let i = 0; i < N; i++) c[S.st[i]]++; return { attached: c[0], drain: c[1], fly: c[2], fallen: c[3], tc: S.tc, tEr, confined, hi, hCr, strands: NS, ck: ck.size }; }
+    function stats() { const c = [0, 0, 0, 0]; for (let i = 0; i < N; i++) c[S.st[i]]++; let hs = 0; for (let i = 0; i < N; i++) if (hTh[i] <= S.tc) hs++;
+      return { attached: c[0], drain: c[1], fly: c[2], fallen: c[3], heating: hs, tc: S.tc, tEr, confined, hi, hCr, strands: NS, ck: ck.size }; }
     return { at, stats, hAt, N, tEr, confined, frame: { m, ax, side, L } };
   }
   const api = { create };

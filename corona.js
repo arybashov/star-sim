@@ -537,6 +537,16 @@
     uniform sampler3D uVol, uVolB; uniform sampler2D uHist, uHistD, uDW, uTA; uniform sampler2D uCarp, uMoss; uniform float uCarpOn, uMossH; uniform float uTubes, uTW0, uTW1, uTK, uTRamp, uFurDisk, uFurLo, uFurHi; uniform float uDOn; uniform float uMix, uRc, uMuA, uMuB, uSurfOn, uGas; uniform mat3 uCamRot; uniform vec3 uCam; uniform float uTanH, uAspect, uRmin, uRmax, uI0, uIw, uW, uRaw, uSteps, uFur, uFurK1, uFurK2, uFurSig, uFurNorm, uFurStep, uTime;
     const float PI = 3.14159265359;
     vec3 uvw(vec3 p) { float r = length(p); return vec3(fract(atan(p.z, p.x) / (2.0 * PI) + 1.0), acos(clamp(p.y / r, -1.0, 1.0)) / PI, log(r / uRmin) / log(uRmax / uRmin)); }
+    // выборка объёма без ступеней (автор: «кольца ступеньками идут — никак это не победить»): между узлами сетки по долготе и широте яркость
+    // шла линейно — граница яркой короны над областью выходила ломаной с углами в узлах (ячейка ≈ 3,7°); теперь по долготе и широте —
+    // кубический B-сплайн четырьмя линейными выборками (GPU Gems 2, гл. 20: веса и сдвиги выборок), по высоте — линейно; сплайн слегка
+    // сглаживает (не проходит через узлы). uCubic 0 — прежняя линейная выборка
+    uniform float uCubic;
+    vec4 volS(sampler3D V, vec3 q) { if (uCubic < 0.5) return texture(V, q);
+      vec2 N = vec2(textureSize(V, 0).xy), x = q.xy * N - 0.5, i = floor(x), f = x - i, f2 = f * f, f3 = f2 * f;
+      vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0, w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;
+      vec2 g0 = w0 + w1, g1 = w2 + w3, p0 = (i - 0.5 + w1 / g0) / N, p1 = (i + 1.5 + w3 / g1) / N;
+      return g0.y * (g0.x * texture(V, vec3(p0.x, p0.y, q.z)) + g1.x * texture(V, vec3(p1.x, p0.y, q.z))) + g1.y * (g0.x * texture(V, vec3(p0.x, p1.y, q.z)) + g1.x * texture(V, vec3(p1.x, p1.y, q.z))); }
     bool sphere(vec3 o, vec3 d, float R, out vec2 t) { float b = dot(o, d), c = dot(o, o) - R * R, h = b * b - c; if (h < 0.0) return false; h = sqrt(h); t = vec2(-b - h, -b + h); return true; }
     // золотая палитра канала 17,4 нм (как у снимков EUI): чёрный → бурый → оранжевый → золото → бледно-жёлтый
     vec3 gold(float x) { vec3 c = mix(vec3(0.0), vec3(0.28, 0.12, 0.02), smoothstep(0.0, 0.25, x)); c = mix(c, vec3(0.85, 0.45, 0.07), smoothstep(0.2, 0.55, x));
@@ -671,11 +681,11 @@
       for (int k = 0; k < 1500; k++) { if (t >= b || (uGas < 0.5 && fw <= 0.0)) break; vec3 p = o + t * d; float r = length(p);
         float fr = fw * (1.0 - smoothstep(1.3, 1.4, r)), sk = mix(1.0, uFurStep, fr);   // выше 1,4 R★ — без меха и обычным шагом
         float ds = min(sk * clamp(0.1 * (r - 1.0) + 0.003, 0.003, 0.08), b - t); vec3 ps = o + (t + j * ds) * d;
-        vec3 q = uvw(ps); vec4 v = texture(uVol, q); float e = v.r;
+        vec3 q = uvw(ps); vec4 v = volS(uVol, q); float e = v.r;
         float rk = 1.0 - smoothstep(1.3, 1.4, r);
         { float lf = length(v.gba); e *= furM((fwE + fwD * furGate(e)) * rk, lf > 0.2 ? v.gba / lf : vec3(0.0), lf > 0.2); }
         // смена снимка поля: новый объём проявляется поверх прежнего (свечение смешивается, метки — каждая в своём объёме)
-        if (uMix > 0.0) { vec4 v2 = texture(uVolB, q); float e2 = v2.r, l2 = length(v2.gba); e2 *= furM((fwE + fwD * furGate(e2)) * rk, l2 > 0.2 ? v2.gba / l2 : vec3(0.0), l2 > 0.2); e = mix(e, e2, uMix); }
+        if (uMix > 0.0) { vec4 v2 = volS(uVolB, q); float e2 = v2.r, l2 = length(v2.gba); e2 *= furM((fwE + fwD * furGate(e2)) * rk, l2 > 0.2 ? v2.gba / l2 : vec3(0.0), l2 > 0.2); e = mix(e, e2, uMix); }
         e *= chAtt(ps, d) * cmeF(cmT, t, ds) * partT(t + j * ds);   // частицы выброса — на глубине выборки
         if (length(ps) > uRc) I += e * ds; else Il += e * ds; t += ds; }
       // живая текстура и трубки — без поглощения хромосферой (выключены по умолчанию; разбор Codex: при поглощении их пути несогласованы)
@@ -811,7 +821,7 @@
     const ru = { uVol: { value: vols[0].texture }, uVolB: { value: vols[1].texture }, uHist: { value: null }, uHistD: { value: null }, uDW: { value: null }, uDOn: { value: 0 }, uMix: { value: 0 },
       uRc: { value: 1 + o.shell }, uMuA: { value: o.muA }, uMuB: { value: o.muB }, uSurfOn: { value: o.surf }, uCamRot: { value: new THREE.Matrix3() }, uCam: { value: new THREE.Vector3() }, uTanH: { value: 0.4 }, uAspect: { value: 1 }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uI0: { value: 1 }, uIw: { value: 100 }, uW: { value: 1 }, uRaw: { value: 0 }, uSteps: { value: 600 },
-      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uPOn: { value: 0 }, uPBnd: { value: new Float32Array(9) }, uPT0: { value: null }, uPT1: { value: null }, uPE0: { value: null }, uPE1: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
+      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uPOn: { value: 0 }, uPBnd: { value: new Float32Array(9) }, uCubic: { value: o.cubic != null ? o.cubic : 1 }, uPT0: { value: null }, uPT1: { value: null }, uPE0: { value: null }, uPE1: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
     Object.assign(ru, evU);   // событие: ленты, пузырь выброса, затемнение
     const rayMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: RAY_FS, uniforms: ru, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
@@ -1267,7 +1277,7 @@
       ru.uTA.value = tubes.acc.texture; }
     // ---- выброс частицами: движение — M31CmeParticles (cme-particles.js), здесь — экземпляры и проход в слои глубины
     const CP = typeof M31CmeParticles !== 'undefined' ? M31CmeParticles : (typeof require === 'function' ? (() => { try { return require('./cme-particles.js'); } catch (e) { return null; } })() : null);
-    const part = { on: true, dome: false, prm: { tau0: 2, e0: 0.1, fFall: 0.5, N: 8000 }, sim: null, key: '', rope: null, ropeSig: '', n: 0, P: null, Q: null, mrt: null, cap: 0, geo: null, mesh: null, scene: new THREE.Scene(), Dv: new Float32Array(0), Wv: new Float32Array(0), hist: new Float64Array(256) };
+    const part = { on: true, dome: false, prm: { tau0: 2, e0: 0.1, fFall: 0.5, N: 8000, hotE: 4, hotF: 0.5 }, sim: null, key: '', rope: null, ropeSig: '', n: 0, P: null, Q: null, mrt: null, cap: 0, geo: null, mesh: null, scene: new THREE.Scene(), Dv: new Float32Array(0), Wv: new Float32Array(0), hist: new Float64Array(256) };
     const pu = { uView: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() }, uCam: { value: new THREE.Vector3() }, uPx: { value: 0.001 }, uPBnd: ru.uPBnd };
     const pMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: PART_VS, fragmentShader: PART_FS, uniforms: pu, depthTest: false, depthWrite: false, transparent: false, side: THREE.DoubleSide,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
@@ -1308,7 +1318,7 @@
       renderer.setRenderTarget(part.mrt); renderer.setClearColor(0x000000, 0); renderer.clear(true, false, false); renderer.render(part.scene, camera); renderer.setClearColor(cc, ca); renderer.setRenderTarget(prev);
       const tx = part.mrt.texture; ru.uPT0.value = tx[0]; ru.uPT1.value = tx[1]; ru.uPE0.value = tx[2]; ru.uPE1.value = tx[3]; ru.uPOn.value = 1; }
     function setCmeParts(v) { v = v || {}; if (v.on != null) part.on = !!v.on; if (v.dome != null) part.dome = !!v.dome;
-      for (const k of ['tau0', 'e0', 'fFall', 'N']) if (v[k] != null && isFinite(v[k])) part.prm[k] = k === 'N' ? Math.max(100, Math.round(v[k])) : +v[k]; }
+      for (const k of ['tau0', 'e0', 'fFall', 'N', 'hotE', 'hotF']) if (v[k] != null && isFinite(v[k])) part.prm[k] = k === 'N' ? Math.max(100, Math.round(v[k])) : +v[k]; }
     // ---- газодинамика в трубках (этап 3, второй шаг; автор: «давай газодинамику в трубки»; замысел — разбор Codex): K закреплённых петель
     // считает hydro1d в фоновых потоках (hydro-worker.js). При 24 ч/с поверхности газ невидим (петля приходит к равновесию RTV быстрее кадра),
     // поэтому газ идёт на своих часах (по умолчанию 30×) на снимке поля: входы короны не принимаются, основания и форма стоят (жизнь

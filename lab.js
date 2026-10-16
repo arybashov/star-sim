@@ -41,6 +41,8 @@
     ['Выброс — нити и брызги (17,1 нм)', [['labCmeTau', 'нити: средняя оптическая толщина волокна в 17,1 нм — тёмность (≈ 1–3 по моделям; 0 — не поглощают)', 0, 5, 0.1],
       ['labCmeE', 'нити: свечение краёв — переходный слой (доля по виду; 0,1 — на диске тёмные, над краем видны; 0 — только тёмные)', 0, 1, 0.01],
       ['labCmeFall', 'доля вещества, которое отрывается: стекает по ногам и падает брызгами (у запертого — всё)', 0, 1, 0.05],
+      ['labCmeHot', 'нагрев: доля областей нитей, начавших греться к подъёму 0,5 R★ (после срыва; 0 — без нагрева)', 0, 1, 0.05],
+      ['labCmeHotE', 'нагрев: яркость нагретых нитей в 171 (0,6–1 МК; по виду: при 1 их почти не видно)', 0, 10, 0.1],
       ['labCmeN', 'частиц — подробность рисунка (масса та же)', 1000, 30000, 500]]],
     ['Плавание пятен', [['labProtD', 'вращение звезды: период, сут (0 — стоит; Проксима 83,1)', 0, 200, 0.1], ['labOmEq', 'экватор быстрее системы, рад/сут', -0.02, 0.02, 0.001],
       ['labDOm', 'дифференциальное вращение ΔΩ экв.−полюс, рад/сут (Солнце 0,042; у M-карликов не измерено)', -0.06, 0.06, 0.001], ['labVmer', 'меридиональное течение к полюсам, м/с (не измерено)', -20, 20, 0.5],
@@ -77,7 +79,7 @@
   // физика по литературе: плазма частицами по нитям поля 1/r² (погружённые заряды), поверхность источника 2,5 R★, слабый фон
   // открытого поля, полюса дрейфуют, как в сцене автора (DOC «Вспышки…», «Сравнение с литературой»)
   const PHYS = { archMode: 3, falloff: 2, open: 0, rSS: 2.5, surface: 1, pTrail: 0, pSize: 0.008, pBright: 2.5, pN: 30000, heat: 0.2, dipoleG: 25,
-    bright: 0.6, rim: 0, rimPow: 4, granPhys: 1, labPhysics: 1, spreadKm2s: 250, labEye: 1, pairRigid: 1, driftKms: 0, labChH: 1, labChE: 4, labChSH: 5, labChSE: 12, labPlageF: 1, labPlageD: 0, labXNu: 1.5, labFanF: 0, labCarpBlur: 0.17, labCmeTau: 2, labCmeE: 0.1, labCmeFall: 0.5, labCmeN: 8000 };   // диполь 25 Гс — Барнард: продольное поле 6,9 Гс скв. (Donati et al. 2023, SPIRou) → полюс ≈ 20–25 Гс; нагрев 0,2 — средняя T короны ≈ 1,9 МК (Барнард: L_X ≈ 10²⁶ → T̄ ≈ 1,8 МК, Johnstone & Güdel 2015); точки без хвостов (автор: хвосты портят картину)   // open 0 — суммарный поток звезды нулевой (полюса уничтожают друг друга)
+    bright: 0.6, rim: 0, rimPow: 4, granPhys: 1, labPhysics: 1, spreadKm2s: 250, labEye: 1, pairRigid: 1, driftKms: 0, labChH: 1, labChE: 4, labChSH: 5, labChSE: 12, labPlageF: 1, labPlageD: 0, labXNu: 1.5, labFanF: 0, labCarpBlur: 0.17, labCmeTau: 2, labCmeE: 0.1, labCmeFall: 0.5, labCmeN: 8000, labCmeHot: 0.5, labCmeHotE: 4 };   // диполь 25 Гс — Барнард: продольное поле 6,9 Гс скв. (Donati et al. 2023, SPIRou) → полюс ≈ 20–25 Гс; нагрев 0,2 — средняя T короны ≈ 1,9 МК (Барнард: L_X ≈ 10²⁶ → T̄ ≈ 1,8 МК, Johnstone & Güdel 2015); точки без хвостов (автор: хвосты портят картину)   // open 0 — суммарный поток звезды нулевой (полюса уничтожают друг друга)
   const st = Object.assign({ mode: 'star', sp: 'M4V', comp: 0, name: 'Барнард', R: 0.187, M: 0.162, seed: 101, star: {}, sn: {}, arches: true, flares: true, cme: true, earth: false, speed: 1, glow: true, glowK: 0.9, glowT: 0.95, glowR: 0.5 },
     (() => { try { return JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { return {}; } })());
   if ((st.hou | 0) < 9) { delete st.star.poleDrift; delete st.star.surfH; delete st.star.corrH; st.star = Object.assign({}, st.star, PHYS); st.hou = 9; }   // один раз: плазма, самостоятельные полюса, 1 с = сутки
@@ -168,11 +170,13 @@
   if ((st.hou | 0) < 68) { if (st.name === 'Солнце') st.star.cmeEscape = 1; st.hou = 68; }
   // выброс частицами (автор: «давай как в ультрафиолете — нити и брызги»): тёмность нитей, свечение краёв, доля отрыва, частиц
   if ((st.hou | 0) < 70) { for (const k of ['labCmeTau', 'labCmeE', 'labCmeFall', 'labCmeN']) st.star[k] = PHYS[k]; st.hou = 70; }
+  // нагрев нитей выброса по времени (автор: «давай нагрев по времени»)
+  if ((st.hou | 0) < 72) { for (const k of ['labCmeHot', 'labCmeHotE']) st.star[k] = PHYS[k]; st.hou = 72; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
       const cL = corona.carpet ? corona.carpet().L : 0.03;
       if (corona.setCarpet) corona.setCarpet({ xNu: e.labXNu != null ? e.labXNu : 1.5, blur: (e.labCarpBlur != null ? e.labCarpBlur : 0.17) * cL }); if (corona.setFans) corona.setFans({ fanF: e.labFanF != null ? e.labFanF : 0 });
-      if (corona.setCmeParts) corona.setCmeParts({ on: st.cmeParts !== false, dome: st.cmeDome === true, tau0: e.labCmeTau != null ? e.labCmeTau : 2, e0: e.labCmeE != null ? e.labCmeE : 0.1, fFall: e.labCmeFall != null ? e.labCmeFall : 0.5, N: e.labCmeN || 8000 }); } }
+      if (corona.setCmeParts) corona.setCmeParts({ on: st.cmeParts !== false, dome: st.cmeDome === true, tau0: e.labCmeTau != null ? e.labCmeTau : 2, e0: e.labCmeE != null ? e.labCmeE : 0.1, fFall: e.labCmeFall != null ? e.labCmeFall : 0.5, N: e.labCmeN || 8000, hotF: e.labCmeHot != null ? e.labCmeHot : 0.5, hotE: e.labCmeHotE != null ? e.labCmeHotE : 4 }); } }
 
   // ---- сцена
   const view = $('view'), renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
@@ -307,7 +311,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     if (st.euv !== false && window.M31Corona && SSo && st.mode !== 'sn') {
       if (!M31Corona.supported(renderer)) console.warn('корона: нужен WebGL2 с EXT_color_buffer_float — ультрафиолет выключен');
       else corona = M31Corona.create(THREE, renderer, Object.assign({ R: star.phys.rKm * 1e5, M: star.phys.mSun * 1.989e33, rMax: star.params.rSS > 1 ? star.params.rSS : 2.5, gas: st.euvGas === false ? 0 : 1 }, euvGrid())); }
-    if (corona) { if (corona.setCarpet) corona.setCarpet(st.euvCarpet === true); applyChrom(); if (corona.setTone) corona.setTone(st.euvTone !== 'log'); corona.uniforms.uSurfOn.value = st.euvSurf === true ? 1 : 0; corona.uniforms.uFurDisk.value = st.euvFurDisk === true ? 1 : 0; if (corona.setHydro) corona.setHydro(false); if (corona.setTubes) corona.setTubes(st.euvTubes === true); if (corona.setPoles) corona.setPoles(star.polesView ? star.polesView() : star.poles); const [C, fh] = coronaInputs(); corona.bake(C, fh); if (corona.setHydro) corona.setHydro(hydroOn); applyDbg(); coronaCal = true; coronaCalT = 0; coronaClk = coronaLiveClk = star.surfClockView ? star.surfClockView() : star.surfClock ? star.surfClock() : 0; }   // часы показа (разбор Codex)
+    if (corona) { if (corona.setCarpet) corona.setCarpet(st.euvCarpet === true); applyChrom(); if (corona.setTone) corona.setTone(st.euvTone !== 'log'); corona.uniforms.uSurfOn.value = st.euvSurf === true ? 1 : 0; corona.uniforms.uFurDisk.value = st.euvFurDisk === true ? 1 : 0; corona.uniforms.uCubic.value = st.euvCubic === false ? 0 : 1; if (corona.setHydro) corona.setHydro(false); if (corona.setTubes) corona.setTubes(st.euvTubes === true); if (corona.setPoles) corona.setPoles(star.polesView ? star.polesView() : star.poles); const [C, fh] = coronaInputs(); corona.bake(C, fh); if (corona.setHydro) corona.setHydro(hydroOn); applyDbg(); coronaCal = true; coronaCalT = 0; coronaClk = coronaLiveClk = star.surfClockView ? star.surfClockView() : star.surfClock ? star.surfClock() : 0; }   // часы показа (разбор Codex)
     applyDbg();   // без короны (ультрафиолет выключен) поверхность не держится (разбор Codex)
     euvLabel();
   }
@@ -546,6 +550,7 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     ['carpet', 'магнитный ковёр — короткие петли спокойной поверхности (сеть ячеек)', () => st.euvCarpet === true, v => { st.euvCarpet = !!v; if (corona && corona.setCarpet) corona.setCarpet(v); save(); }, true],
     ['furdisk', 'мех и на диске (рисунок газа без текстуры)', () => st.euvFurDisk === true, v => { st.euvFurDisk = !!v; if (corona) corona.uniforms.uFurDisk.value = v ? 1 : 0; save(); }, true],
     ['surface', 'живая текстура нижнего слоя (каждый кадр; выключена — газ одним слоем до поверхности)', () => st.euvSurf === true, v => { st.euvSurf = !!v; if (corona) corona.uniforms.uSurfOn.value = v ? 1 : 0; save(); }, true],
+    ['cubic', 'объём короны — плавная выборка между ячейками (без ступеней по сетке; выключено — линейная, ломаная)', () => st.euvCubic !== false, v => { st.euvCubic = !!v; if (corona) corona.uniforms.uCubic.value = v ? 1 : 0; save(); }, true],
     ['tone', 'тон как у снимков AIA 171 — √ яркости (выключено — логарифм: перепады сжаты)', () => st.euvTone !== 'log', v => { st.euvTone = v ? 'aia' : 'log'; if (corona && corona.setTone) corona.setTone(v); save(); }, true],
     ['emit', 'яркость объёма по живому нагреву (каждый кадр)', () => comp.emit, v => { comp.emit = v; }, true],
     ['rebake', 'форма петель объёма — снимками по ходу поля', () => comp.rebake, v => { comp.rebake = v; }, true],
