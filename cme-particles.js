@@ -91,9 +91,11 @@
     const RH = mulberry(seed ^ 0x7ea7), HL = 0.45, NHN = Math.ceil(2 / HL) + 1, NBd = strands.reduce((a, q) => Math.max(a, q.b + 1), 0), preSide = asym > 0 ? 1 : -1;
     const hn = []; for (let b = 0; b < NBd; b++) for (let k = 0; k < NHN; k++) { const sk0 = -1 + k * HL, warm = RH() < 0.7;
       hn.push({ u: RH(), tau: (300 + 900 * RH()) / alpha, tm: warm ? 5.8 + 0.2 * RH() : 6.1 + 0.3 * RH(), pre: sk0 * preSide > 0.4 && RH() < 0.5 ? 1 : 0, hold: (900 + 1800 * RH()) / alpha }); }
-    const fhT = new Float32Array(H.length); { let mx = 0; for (let i = 0; i < H.length; i++) { if (tEr >= 0 && i * rdt >= tEr) { const x = Math.min(1, Math.max(0, (H[i] - hi) / 0.5)); mx = Math.max(mx, f1 * (0.2 + 0.8 * x * x * (3 - 2 * x))); } fhT[i] = mx; } }
-    const thOf = u => { if (f1 <= 0 || tEr < 0 || fhT[fhT.length - 1] < u) return 1e9;   // 0 — без нагрева (разбор Codex)
-      let a = 0, b = fhT.length - 1; while (a < b) { const md = (a + b) >> 1; if (fhT[md] >= u) b = md; else a = md + 1; } return Math.max(tEr, a * rdt); };
+    // начало нагрева — срыв; у запертого без срыва (жгут поднялся, но порог не пройден) — начало заметного подъёма (+0,02 R★ или +20 %)
+    let tH0 = tEr; if (tH0 < 0) for (let i = 0; i < H.length; i++) if (H[i] > hi + Math.max(0.02, 0.2 * hi)) { tH0 = i * rdt; break; }
+    const fhT = new Float32Array(H.length); { let mx = 0; for (let i = 0; i < H.length; i++) { if (tH0 >= 0 && i * rdt >= tH0) { const x = Math.min(1, Math.max(0, (H[i] - hi) / 0.5)); mx = Math.max(mx, f1 * (0.2 + 0.8 * x * x * (3 - 2 * x))); } fhT[i] = mx; } }
+    const thOf = u => { if (f1 <= 0 || tH0 < 0 || fhT[fhT.length - 1] < u) return 1e9;   // 0 — без нагрева (разбор Codex)
+      let a = 0, b = fhT.length - 1; while (a < b) { const md = (a + b) >> 1; if (fhT[md] >= u) b = md; else a = md + 1; } return Math.max(tH0, a * rdt); };
     const hTau = new Float32Array(N), hTm = new Float32Array(N), hPre = new Float32Array(N), hTh = new Float32Array(N), hHold = new Float32Array(N);
     for (let i = 0; i < N; i++) { const b = strands[sk[i]].b, x = (ss[i] + 1) / HL, k0 = Math.min(NHN - 2, Math.floor(x)), f = x - k0, A0 = hn[b * NHN + k0], A1 = hn[b * NHN + k0 + 1];
       hTau[i] = A0.tau + (A1.tau - A0.tau) * f; hHold[i] = A0.hold + (A1.hold - A0.hold) * f; hTm[i] = A0.tm + (A1.tm - A0.tm) * f; hPre[i] = f1 > 0 ? A0.pre + (A1.pre - A0.pre) * f : 0; hTh[i] = thOf(A0.u + (A1.u - A0.u) * f); }
