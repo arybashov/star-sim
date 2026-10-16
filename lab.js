@@ -37,6 +37,11 @@
       ['labXNu', 'протяжённая спокойная корона: плотность × RTV (Солнце 1 — по снимку SDO; по умолчанию 1,5)', 0.3, 3, 0.05],
       ['labFanF', 'веера петель активных областей (≈ 1 МК на краях областей): доля (0 — без вееров, как решил автор; при 0,5 — засветка)', 0, 2, 0.05],
       ['labCarpBlur', 'магнитный ковёр: размытие света вдоль петель, доля длины петли (0,17 — по виду; 0,5 — как на SDO, но сеть бледнее)', 0, 1, 0.01]]],
+    // выброс частицами (автор: «давай как в ультрафиолете — нити и брызги»; ориентиры — снимки AIA 31.08.2012 и 07.06.2011)
+    ['Выброс — нити и брызги (17,1 нм)', [['labCmeTau', 'нити: средняя оптическая толщина волокна в 17,1 нм — тёмность (≈ 1–3 по моделям; 0 — не поглощают)', 0, 5, 0.1],
+      ['labCmeE', 'нити: свечение краёв — переходный слой (доля по виду; 0,1 — на диске тёмные, над краем видны; 0 — только тёмные)', 0, 1, 0.01],
+      ['labCmeFall', 'доля вещества, которое отрывается: стекает по ногам и падает брызгами (у запертого — всё)', 0, 1, 0.05],
+      ['labCmeN', 'частиц — подробность рисунка (масса та же)', 1000, 30000, 500]]],
     ['Плавание пятен', [['labProtD', 'вращение звезды: период, сут (0 — стоит; Проксима 83,1)', 0, 200, 0.1], ['labOmEq', 'экватор быстрее системы, рад/сут', -0.02, 0.02, 0.001],
       ['labDOm', 'дифференциальное вращение ΔΩ экв.−полюс, рад/сут (Солнце 0,042; у M-карликов не измерено)', -0.06, 0.06, 0.001], ['labVmer', 'меридиональное течение к полюсам, м/с (не измерено)', -20, 20, 0.5],
       ['labDspot', 'случайное блуждание пятен, км²/с (не измерено)', 0, 10, 0.1], ['labOuH', 'блуждание: время памяти скорости, ч', 2, 96, 1], ['pairRigid', 'пара после расхождения — целиком', 0, 1, 1]]],
@@ -72,7 +77,7 @@
   // физика по литературе: плазма частицами по нитям поля 1/r² (погружённые заряды), поверхность источника 2,5 R★, слабый фон
   // открытого поля, полюса дрейфуют, как в сцене автора (DOC «Вспышки…», «Сравнение с литературой»)
   const PHYS = { archMode: 3, falloff: 2, open: 0, rSS: 2.5, surface: 1, pTrail: 0, pSize: 0.008, pBright: 2.5, pN: 30000, heat: 0.2, dipoleG: 25,
-    bright: 0.6, rim: 0, rimPow: 4, granPhys: 1, labPhysics: 1, spreadKm2s: 250, labEye: 1, pairRigid: 1, driftKms: 0, labChH: 1, labChE: 4, labChSH: 5, labChSE: 12, labPlageF: 1, labPlageD: 0, labXNu: 1.5, labFanF: 0, labCarpBlur: 0.17 };   // диполь 25 Гс — Барнард: продольное поле 6,9 Гс скв. (Donati et al. 2023, SPIRou) → полюс ≈ 20–25 Гс; нагрев 0,2 — средняя T короны ≈ 1,9 МК (Барнард: L_X ≈ 10²⁶ → T̄ ≈ 1,8 МК, Johnstone & Güdel 2015); точки без хвостов (автор: хвосты портят картину)   // open 0 — суммарный поток звезды нулевой (полюса уничтожают друг друга)
+    bright: 0.6, rim: 0, rimPow: 4, granPhys: 1, labPhysics: 1, spreadKm2s: 250, labEye: 1, pairRigid: 1, driftKms: 0, labChH: 1, labChE: 4, labChSH: 5, labChSE: 12, labPlageF: 1, labPlageD: 0, labXNu: 1.5, labFanF: 0, labCarpBlur: 0.17, labCmeTau: 2, labCmeE: 0.1, labCmeFall: 0.5, labCmeN: 8000 };   // диполь 25 Гс — Барнард: продольное поле 6,9 Гс скв. (Donati et al. 2023, SPIRou) → полюс ≈ 20–25 Гс; нагрев 0,2 — средняя T короны ≈ 1,9 МК (Барнард: L_X ≈ 10²⁶ → T̄ ≈ 1,8 МК, Johnstone & Güdel 2015); точки без хвостов (автор: хвосты портят картину)   // open 0 — суммарный поток звезды нулевой (полюса уничтожают друг друга)
   const st = Object.assign({ mode: 'star', sp: 'M4V', comp: 0, name: 'Барнард', R: 0.187, M: 0.162, seed: 101, star: {}, sn: {}, arches: true, flares: true, cme: true, earth: false, speed: 1, glow: true, glowK: 0.9, glowT: 0.95, glowR: 0.5 },
     (() => { try { return JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { return {}; } })());
   if ((st.hou | 0) < 9) { delete st.star.poleDrift; delete st.star.surfH; delete st.star.corrH; st.star = Object.assign({}, st.star, PHYS); st.hou = 9; }   // один раз: плазма, самостоятельные полюса, 1 с = сутки
@@ -161,10 +166,13 @@
   if ((st.hou | 0) < 67) { if (st.name === 'Солнце') st.star.cycle = 60; st.hou = 67; }
   // выброс Солнца уходит (автор: «давай выброс пусть летит»); у M-карликов извержения по умолчанию запертые — как прежде
   if ((st.hou | 0) < 68) { if (st.name === 'Солнце') st.star.cmeEscape = 1; st.hou = 68; }
+  // выброс частицами (автор: «давай как в ультрафиолете — нити и брызги»): тёмность нитей, свечение краёв, доля отрыва, частиц
+  if ((st.hou | 0) < 70) { for (const k of ['labCmeTau', 'labCmeE', 'labCmeFall', 'labCmeN']) st.star[k] = PHYS[k]; st.hou = 70; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
       const cL = corona.carpet ? corona.carpet().L : 0.03;
-      if (corona.setCarpet) corona.setCarpet({ xNu: e.labXNu != null ? e.labXNu : 1.5, blur: (e.labCarpBlur != null ? e.labCarpBlur : 0.17) * cL }); if (corona.setFans) corona.setFans({ fanF: e.labFanF != null ? e.labFanF : 0 }); } }
+      if (corona.setCarpet) corona.setCarpet({ xNu: e.labXNu != null ? e.labXNu : 1.5, blur: (e.labCarpBlur != null ? e.labCarpBlur : 0.17) * cL }); if (corona.setFans) corona.setFans({ fanF: e.labFanF != null ? e.labFanF : 0 });
+      if (corona.setCmeParts) corona.setCmeParts({ on: st.cmeParts !== false, dome: st.cmeDome === true, tau0: e.labCmeTau != null ? e.labCmeTau : 2, e0: e.labCmeE != null ? e.labCmeE : 0.1, fFall: e.labCmeFall != null ? e.labCmeFall : 0.5, N: e.labCmeN || 8000 }); } }
 
   // ---- сцена
   const view = $('view'), renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
@@ -355,7 +363,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     const el = e.target; if (!el.dataset.k) return;
     const k = el.dataset.k, w = el.dataset.w, v = +el.value; (w === 'sn' ? st.sn : st.star)[k] = v; $(el.id + 'o').textContent = fmt(v);
     if (w === 'sn') { if (SM.SN_GEOM.includes(k)) rebuild(); else if (sn) sn.setLook({ [k]: v }); }
-    else if (/^labCh/.test(k)) applyChrom(); else if (k === 'labPlageF' || k === 'labPlageD') { if (corona) corona.inputs(...coronaInputs()); } else if (k === 'labXNu' || k === 'labFanF' || k === 'labCarpBlur') applyChrom(); else if (SM.GEOM.includes(k)) rebuild(); else star.setLook({ [k]: v });
+    else if (/^labCh/.test(k) || /^labCme/.test(k)) applyChrom(); else if (k === 'labPlageF' || k === 'labPlageD') { if (corona) corona.inputs(...coronaInputs()); } else if (k === 'labXNu' || k === 'labFanF' || k === 'labCarpBlur') applyChrom(); else if (SM.GEOM.includes(k)) rebuild(); else star.setLook({ [k]: v });
     if (k === 'cycle' || k === 'snCycle') $('scrub').max = v;
     save();
   });
@@ -389,8 +397,9 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     if (star && star.poles && star.poles.length >= 2) { star.group.updateMatrixWorld(); const P0 = star.poles[0].p.clone().normalize(), P1 = star.poles[1].p.clone().normalize(), m = P0.clone().add(P1).normalize(),
       side = m.clone().cross(P0.clone().sub(P1)).normalize(), rot = new THREE.Matrix4().extractRotation(star.group.matrixWorld);
       // с выбросом — сбоку (автор: «давай выброс пусть летит»): область у края диска (80° от направления на камеру), камера в 5,5 R★ от центра —
-      // в кадре край звезды и путь выброса; только вспышка — область почти по центру (25°), камера в 3,4 R★
-      const ang = st.cme ? 1.4 : 0.44, loc = m.clone().multiplyScalar(Math.cos(ang)).addScaledVector(side, Math.sin(ang)).normalize();
+      // в кадре край звезды и путь выброса; взгляд поперёк линии раздела — дуга нитей в плоскости кадра, как на снимке 31.08.2012 (разбор
+      // Codex); только вспышка — область почти по центру (25°), камера в 3,4 R★
+      const ang = st.cme ? 1.4 : 0.44, ax = P0.clone().sub(P1).normalize(), loc = m.clone().multiplyScalar(Math.cos(ang)).addScaledVector(st.cme ? ax : side, Math.sin(ang)).normalize();
       flyTo(loc.applyMatrix4(rot).normalize(), st.cme ? 5.5 : 3.4); } });
   $('speed').value = st.speed; $('speedO').textContent = st.speed; $('speed').addEventListener('input', e => { st.speed = +e.target.value; $('speedO').textContent = st.speed; save(); });
   $('scrub').addEventListener('input', e => { t = +e.target.value; });
@@ -541,7 +550,9 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     ['emit', 'яркость объёма по живому нагреву (каждый кадр)', () => comp.emit, v => { comp.emit = v; }, true],
     ['rebake', 'форма петель объёма — снимками по ходу поля', () => comp.rebake, v => { comp.rebake = v; }, true],
     ['flares', 'вспышка (сценарная)', () => st.flares, v => { if ($('optFlares').checked !== v) $('optFlares').click(); }],
-    ['cme', 'выброс (сценарный)', () => st.cme, v => { if ($('optCme').checked !== v) $('optCme').click(); }]];
+    ['cme', 'выброс (сценарный)', () => st.cme, v => { if ($('optCme').checked !== v) $('optCme').click(); }],
+    ['parts', 'выброс частицами — нити волокна и брызги (как на снимках AIA)', () => st.cmeParts !== false, v => { st.cmeParts = !!v; applyChrom(); save(); }, true],
+    ['dome', 'выброс — прежний светлый купол (для сравнения; свечение по закону 17,1 нм)', () => st.cmeDome === true, v => { st.cmeDome = !!v; applyChrom(); save(); }, true]];
   function compRender() {
     $('comps').innerHTML = '<span class="h">часть</span><span class="h n">процессор</span><span class="h n">видеокарта</span>' + COMP.map(([k, name, get, , sub]) =>
       `<label class="${sub ? 'sub' : ''}"><input type="checkbox" data-c="${k}"${get() ? ' checked' : ''}> ${name}</label><span class="n" id="cc_${k}"></span><span class="n" id="cg_${k}"></span>`).join(''); }
