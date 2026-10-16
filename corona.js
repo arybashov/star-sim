@@ -25,10 +25,40 @@
       for (int i = 0; i < NCMAX; i++) { if (i >= uNC) break; vec3 d = x - uC[i].xyz; float r2 = dot(d, d) + 1e-6, rr = sqrt(r2); b += uC[i].w * d / (r2 * rr); dm = min(dm, rr); }
       if (uDip != 0.0) { float r2 = dot(x, x), r3 = r2 * sqrt(r2); float k3 = 3.0 * uDip * dot(uDipM, x) / (r3 * r2); b += k3 * x + uDipM * (-uDip / r3 + uDipU); }
       return b * uGU; }`;
+  // нагрев по населениям петель (автор: «по порядку все», шаг 3; разбор Codex ковра: «бюджеты населений не разделены»): карта нагрева — (F, U,
+  // |B_r|/B_conc); нагрев линеен по сумме ковра c = B_carpet·(1 − U) и разрешённого поля b = |B_r|. Спокойное население (ковёр и протяжённая
+  // корона — слои у поверхности) — ковёр и слабое крупномасштабное поле сети, b·w(b), w = 1/(1 + (b/B_пл)⁴), B_пл = 50 Гс (площадка активной
+  // области — поле ≳ 50–100 Гс); остальное — разрешённые петли областей: их рисует объём (форма — по силовым линиям), у оснований — мох.
+  // Прежде слои брали весь нагрев точки: над областью — яркий столб без петель
+  const FH4_GLSL = `
+    uniform float uCarpG, uBconcH, uBpl, uSuH, uFanF, uCoreF, uFanL0, uFanL1, uWarmV;
+    vec4 fh4At(int i, int j) { return texelFetch(uFH, ivec2((i % uFHW + uFHW) % uFHW, clamp(j, 0, uFHH - 1)), 0); }
+    vec4 fh4(vec3 p) { vec3 n = normalize(p); float x = fract(atan(n.z, n.x) / (2.0 * PI) + 1.0) * float(uFHW) - 0.5, y = acos(clamp(n.y, -1.0, 1.0)) / PI * float(uFHH) - 0.5;
+      int i = int(floor(x)), j = int(floor(y)); float fx = x - floor(x), fy = y - floor(y);
+      return mix(mix(fh4At(i, j), fh4At(i + 1, j), fx), mix(fh4At(i, j + 1), fh4At(i + 1, j + 1), fx), fy); }
+    // доля спокойного населения в нагреве (карта без разбивки — запасная, с процессора — 1)
+    // вклады — как в карте: ковёр c(1 − U), разрешённое поле — с подавлением в тени: |B_r| − (1 − s_u)·min(|B_r|, U·B_conc) (разбор Codex);
+    // насыщение f ≤ 1 делит оба вклада поровну — доля не меняется
+    float quietShare(vec4 h) { float U = clamp(h.g, 0.0, 1.0), c = uCarpG * (1.0 - U), b = max(h.b, 0.0) * uBconcH, bs = b - (1.0 - uSuH) * min(b, U * uBconcH), w = 1.0 / (1.0 + pow(b / max(uBpl, 1.0), 4.0));
+      return c + bs > 1e-6 ? (c + bs * w) / (c + bs) : 1.0; }
+    // веера петель активных областей (автор: «давай веера петель активных областей»; затем — «было без вееров лучше … и прямо огромные области
+    // засветки»: при доле 0,5 засвечено ≈ 6 % диска — по умолчанию веера выключены, ползунок остался; тёплая составляющая — прежняя, uWarmV
+    // у горячих петель): в 17,1 нм у Солнца ядро области тусклое (2–4 МК, светит
+    // лишь его мох), а светят веера — длинные петли ≈ 0,9 МК на краях области: одним основанием в площадке, другим — в слабом поле
+    // (Brooks et al. 2011; Warren et al. 2003; Winebarger et al. 2003: плотнее равновесия RTV — остывающие после нагрева). Вес — по полю
+    // у оснований и полной длине петли: веер — sA·(1 − sB)·sL, ядро (оба основания в площадке) — малая доля (подгонка: при равном давлении мера
+    // эмиссии у основания — доля × (T/T_w)², при 3 МК ≈ 20 % при доле 0,02 — разбор Codex; из наклона меры эмиссии ядра она прямо не следует);
+    // газ — при T_w и давлении у основания по нагреву петли (RTV). Прежде доля росла с T RTV — больше всего в самых горячих ядрах, у Солнца
+    // наоборот. Доли — подгонка по снимку SDO
+    float warmWb(float bA, float bB, float Lcm) { float bx = max(bA, bB), bn = min(bA, bB), sA = smoothstep(0.8 * uBpl, 2.4 * uBpl, bx), sB = smoothstep(0.6 * uBpl, 1.8 * uBpl, bn), sL = smoothstep(uFanL0, uFanL1, Lcm);
+      return uFanF * sA * (1.0 - sB) * sL + uCoreF * sA * sB; }
+    float warmW(vec3 a, vec3 b, float Lcm) { return warmWb(max(fh4(a).b, 0.0) * uBconcH, max(fh4(b).b, 0.0) * uBconcH, Lcm); }
+    vec4 fh4UV(vec2 t) { float x = fract(t.x) * float(uFHW) - 0.5, y = t.y * float(uFHH) - 0.5; int i = int(floor(x)), j = int(floor(y)); float fx = x - floor(x), fy = y - floor(y);
+      return mix(mix(fh4At(i, j), fh4At(i + 1, j), fx), mix(fh4At(i, j + 1), fh4At(i + 1, j + 1), fx), fy); }`;
   const BAKE_HEAD = `precision highp float; precision highp int; precision highp sampler2D;
     layout(location = 0) out vec4 o0;
     uniform sampler2D uFH; uniform int uFHW, uFHH; uniform float uLayer, uNr, uNt, uNp, uRmin, uRmax, uRcm, uGM, uTopen, uNopen, uBmin, uSW, uSH, uStepMode;
-    uniform highp sampler3D uBG; uniform float uGOn, uGR0, uWarmV, uTWarmV;
+    uniform highp sampler3D uBG; uniform float uGOn, uGR0, uTWarmV;
     ${FIELD_GLSL}
     const float PI = 3.14159265359, KB = ${KB.toExponential(6)}, MP = ${MP.toExponential(6)}, MU = ${MU.toFixed(6)};
     // поле для хода вдоль линии (автор: «давай поле в текстуру»): выше 1,02 R★ — из сетки (вектор поля и расстояние до ближайшего источника,
@@ -60,7 +90,8 @@
       return mix(mix(fhAt(i, j), fhAt(i + 1, j), fx), mix(fhAt(i, j + 1), fhAt(i + 1, j + 1), fx), fy); }
     float fhUV(vec2 t) { float x = fract(t.x) * float(uFHW) - 0.5, y = t.y * float(uFHH) - 0.5; int i = int(floor(x)), j = int(floor(y)); float fx = x - floor(x), fy = y - floor(y);
       return mix(mix(fhAt(i, j), fhAt(i + 1, j), fx), mix(fhAt(i, j + 1), fhAt(i + 1, j + 1), fx), fy); }
-    float resp174(float T) { float z = (log(T) / log(10.0) - 5.95) / 0.12; return exp(-0.5 * z * z); }`;
+    float resp174(float T) { float z = (log(T) / log(10.0) - 5.95) / 0.12; return exp(-0.5 * z * z); }
+    ${FH4_GLSL}`;
   // живая корона над краем (автор: «давай, корону живой»; разбор Codex): объём разделён на геометрию и яркость. Геометрия — снимками, слой за
   // кадр (две линии из ячейки — дорого): оба основания (первым — с B_r > 0: метка узора меха не рвётся на вершине), полудлина петли, тип.
   // Яркость — каждый кадр по живой карте нагрева у оснований (петля RTV, равновесие под тяжестью): нагрев у оснований виден над краем сразу,
@@ -88,19 +119,18 @@
     uniform highp sampler3D uGeo;
     void main() {
       ivec2 ij = ivec2(floor(gl_FragCoord.xy)); float r = uRmin * exp(log(uRmax / uRmin) * (uLayer + 0.5) / uNr);
-      vec4 g = texelFetch(uGeo, ivec3(ij, int(uLayer)), 0); float T = 0.0, pb = 0.0; vec3 foot = vec3(0.0);
+      vec4 g = texelFetch(uGeo, ivec3(ij, int(uLayer)), 0); float T = 0.0, pb = 0.0, ww = 0.0; vec3 foot = vec3(0.0);
       if (g.a == 1.0) {   // замкнутая: петля RTV, нагрев — среднее по основаниям; метка — основание с B_r > 0
-        vec3 a = octUnpack(g.r), b = octUnpack(g.g); foot = a; float F = 0.5 * (fh(a) + fh(b)), L = g.b * uRcm;
+        vec3 a = octUnpack(g.r), b = octUnpack(g.g); foot = a; float F = 0.5 * (fh(a) + fh(b)), L = g.b * uRcm; ww = warmW(a, b, 2.0 * L);
         if (F > 0.0 && L > 0.0) { float Q = F / L; pb = pow(Q / 9.8e4, 6.0 / 7.0) * pow(L, 5.0 / 7.0); T = clamp(1400.0 * pow(pb * L, 1.0 / 3.0), 3e5, 2e7); }
       } else if (g.a == 2.0) { T = uTopen; pb = uNopen * KB * T * 2.3 / 1.2; foot = 0.5 * octUnpack(g.r); }   // открытая: длина метки ½ — признак
       float eps = 0.0;
       if (T > 0.0 && pb > 0.0) { float aa = MU * MP * uGM / (KB * T * uRcm) * (1.0 - 1.0 / r);   // равновесие под тяжестью, изотермически
         float n9 = (1.2 / 2.3) * pb * exp(-aa) / (KB * T) / 1e9; eps = n9 * n9 * resp174(T);
-        // тёплая составляющая (автор: «давай активные области доводи»): корона активной области многотемпературная — веерные петли ≈ 1 МК
-        // плотнее и холоднее равновесия RTV; у горячих замкнутых петель (плавно от 1,6 до 2,6 МК) доля uWarmV плазмы при том же давлении
-        // у основания — при uTWarmV, со своей шкалой высот (эмпирически, по виду активных областей на снимках SDO 171); вдоль настоящих линий
-        if (g.a == 1.0 && uWarmV > 0.0 && T > uTWarmV) { float aw = MU * MP * uGM / (KB * uTWarmV * uRcm) * (1.0 - 1.0 / r), nw = (1.2 / 2.3) * pb * exp(-aw) / (KB * uTWarmV) / 1e9;
-          eps += uWarmV * smoothstep(1.6e6, 2.6e6, T) * nw * nw * resp174(uTWarmV); } }
+        // тёплая составляющая — веера и ядра областей (см. warmWb): доля ww плазмы при T_w и том же давлении у основания, со своей шкалой высот
+        // прежняя тёплая доля (uWarmV у горячих петель, плавно от 1,6 до 2,6 МК) и веера по ползунку
+        if (g.a == 1.0 && T > uTWarmV) { float wt = ww + uWarmV * smoothstep(1.6e6, 2.6e6, T); if (wt > 0.0) { float aw = MU * MP * uGM / (KB * uTWarmV * uRcm) * (1.0 - 1.0 / r), nw = (1.2 / 2.3) * pb * exp(-aw) / (KB * uTWarmV) / 1e9;
+          eps += wt * nw * nw * resp174(uTWarmV); } } }
       // R — свечение 17,4 нм; GBA — основание силовой линии (единичный вектор — замкнутая, длина ½ — открытая, 0 — нет основания)
       o0 = vec4(eps, foot);
     }`;
@@ -151,7 +181,7 @@
       vec4 a = mix(texelFetch(uJL, i0, 0), texelFetch(uJL, i0 + ivec2(1, 0), 0), f.x), b = mix(texelFetch(uJL, i0 + ivec2(0, 1), 0), texelFetch(uJL, i0 + ivec2(1, 1), 0), f.x);
       return e0 * wm * mix(a, b, f.y); }
     // отсчёт k: fn — нагрев у собственного основания (считается один раз на прежнюю и новую форму)
-    vec4 briAt(float fn, vec2 g) { if (g.x < -1.5) return vec4(0.0);
+    vec4 briAt(float fn, float bOwn, vec2 g) { if (g.x < -1.5) return vec4(0.0);
       float T = 0.0, pb = 0.0, rt = uRmax;
       if (g.x >= 0.0) {   // замкнутая: петля RTV, нагрев — среднее по основаниям; x = ((F/9,8·10⁴)·L)^(2/7): p = x³/L, T = 1400·x (то же, что прежде, одним pow)
         float lq = floor(g.y / 4096.0), rq = g.y - lq * 4096.0, L = exp(LQ0 + (LQ1 - LQ0) * lq / 4095.0) * uRcm, F = 0.5 * (fn + fh(octUnpack(g.x)));
@@ -161,7 +191,8 @@
       if (T <= 0.0 || pb <= 0.0) return vec4(0.0);
       float n9 = (1.2 / 2.3) * pb / (KB * T) / 1e9; vec4 J = colJ4(n9 * n9 * resp174(T), 2.0 * MU * MP * uGM / (KB * T * uRcm), rt);
       // тёплая составляющая горячих петель (как в объёме)
-      if (g.x >= 0.0 && uWarmV > 0.0 && T > uTWarmV) { float nw = (1.2 / 2.3) * pb / (KB * uTWarmV) / 1e9; J += colJ4(uWarmV * smoothstep(1.6e6, 2.6e6, T) * nw * nw * resp174(uTWarmV), 2.0 * MU * MP * uGM / (KB * uTWarmV * uRcm), rt); }
+      if (g.x >= 0.0 && T > uTWarmV) { float lq = floor(g.y / 4096.0), ww = warmWb(bOwn, max(fh4(octUnpack(g.x)).b, 0.0) * uBconcH, 2.0 * exp(LQ0 + (LQ1 - LQ0) * lq / 4095.0) * uRcm) + uWarmV * smoothstep(1.6e6, 2.6e6, T);
+        if (ww > 0.0) { float nw = (1.2 / 2.3) * pb / (KB * uTWarmV) / 1e9; J += colJ4(ww * nw * nw * resp174(uTWarmV), 2.0 * MU * MP * uGM / (KB * uTWarmV * uRcm), rt); } }
       return J; }
     ivec2 stor(ivec2 q) { ivec2 h = ivec2(int(uSW), int(uSH)) / 2; return ivec2((q.x & 1) * h.x + (q.x >> 1), (q.y & 1) * h.y + (q.y >> 1)); }   // форма — по фазам (см. SGEO_FS)
     // форма плитки сменяется не скачком (автор: «дергается все»): яркость — смесь по прежней и новой форме, доля новой w растёт от 0 до 1 за
@@ -173,9 +204,10 @@
       // давало остановку и рывок вдогонку); w — положение момента «сейчас − LAG»: [0, 1) — между P2 и P, [1, 2) — между P и S, 2 — S
       ivec2 sq = stor(ivec2(ij)); vec4 g = w >= 1.0 ? texelFetch(uSG, sq, 0) : vec4(-2.0), gp = w < 2.0 ? texelFetch(uSGP, sq, 0) : vec4(-2.0), g2 = w < 1.0 ? texelFetch(uSGP2, sq, 0) : vec4(-2.0);
       vec2 tsz = vec2(uSW, uSH); float f0 = g.x >= 0.0 || gp.x >= 0.0 || g2.x >= 0.0 ? fhUV((ij + spAt(ij, 0)) / tsz) : 0.0, f1 = uK > 1.5 && (g.z >= 0.0 || gp.z >= 0.0 || g2.z >= 0.0) ? fhUV((ij + spAt(ij, 1)) / tsz) : 0.0;
-      vec4 JS = w >= 1.0 ? (uK > 1.5 ? 0.5 * (briAt(f0, g.xy) + briAt(f1, g.zw)) : briAt(f0, g.xy)) : vec4(0.0),
-           JP = w < 2.0 ? (uK > 1.5 ? 0.5 * (briAt(f0, gp.xy) + briAt(f1, gp.zw)) : briAt(f0, gp.xy)) : vec4(0.0),
-           J2 = w < 1.0 ? (uK > 1.5 ? 0.5 * (briAt(f0, g2.xy) + briAt(f1, g2.zw)) : briAt(f0, g2.xy)) : vec4(0.0);
+      float b0 = f0 > 0.0 ? max(fh4UV((ij + spAt(ij, 0)) / tsz).b, 0.0) * uBconcH : 0.0, b1 = f1 > 0.0 ? max(fh4UV((ij + spAt(ij, 1)) / tsz).b, 0.0) * uBconcH : 0.0;
+      vec4 JS = w >= 1.0 ? (uK > 1.5 ? 0.5 * (briAt(f0, b0, g.xy) + briAt(f1, b1, g.zw)) : briAt(f0, b0, g.xy)) : vec4(0.0),
+           JP = w < 2.0 ? (uK > 1.5 ? 0.5 * (briAt(f0, b0, gp.xy) + briAt(f1, b1, gp.zw)) : briAt(f0, b0, gp.xy)) : vec4(0.0),
+           J2 = w < 1.0 ? (uK > 1.5 ? 0.5 * (briAt(f0, b0, g2.xy) + briAt(f1, b1, g2.zw)) : briAt(f0, b0, g2.xy)) : vec4(0.0);
       vec4 J = w >= 2.0 ? JS : w >= 1.0 ? mix(JP, JS, w - 1.0) : mix(J2, JP, w);
       o0 = J; }`;
   // копия прежней формы выбранных плиток (перед их перетрассировкой)
@@ -227,22 +259,6 @@
   // спокойной поверхностью крупное поле даёт длинные петли — по RTV 2–3 МК и редкий газ, в 17,1 нм они тёмные; петли ковра короткие (0,03 R★
   // ≈ 20 тыс. км у Солнца) — ≈ 1 МК и плотные. Нагрев — местный (карта нагрева) × узор сети (среднее 1); газ — RTV на полудлине; свечение у
   // основания ε₀ = n²·R174(T), высота слоя — меньшая из высоты петли (L/π) и половины шкалы высот (свечение ∝ n²)
-  // нагрев по населениям петель (автор: «по порядку все», шаг 3; разбор Codex ковра: «бюджеты населений не разделены»): карта нагрева — (F, U,
-  // |B_r|/B_conc); нагрев линеен по сумме ковра c = B_carpet·(1 − U) и разрешённого поля b = |B_r|. Спокойное население (ковёр и протяжённая
-  // корона — слои у поверхности) — ковёр и слабое крупномасштабное поле сети, b·w(b), w = 1/(1 + (b/B_пл)⁴), B_пл = 50 Гс (площадка активной
-  // области — поле ≳ 50–100 Гс); остальное — разрешённые петли областей: их рисует объём (форма — по силовым линиям), у оснований — мох.
-  // Прежде слои брали весь нагрев точки: над областью — яркий столб без петель
-  const FH4_GLSL = `
-    uniform float uCarpG, uBconcH, uBpl, uSuH;
-    vec4 fh4At(int i, int j) { return texelFetch(uFH, ivec2((i % uFHW + uFHW) % uFHW, clamp(j, 0, uFHH - 1)), 0); }
-    vec4 fh4(vec3 p) { vec3 n = normalize(p); float x = fract(atan(n.z, n.x) / (2.0 * PI) + 1.0) * float(uFHW) - 0.5, y = acos(clamp(n.y, -1.0, 1.0)) / PI * float(uFHH) - 0.5;
-      int i = int(floor(x)), j = int(floor(y)); float fx = x - floor(x), fy = y - floor(y);
-      return mix(mix(fh4At(i, j), fh4At(i + 1, j), fx), mix(fh4At(i, j + 1), fh4At(i + 1, j + 1), fx), fy); }
-    // доля спокойного населения в нагреве (карта без разбивки — запасная, с процессора — 1)
-    // вклады — как в карте: ковёр c(1 − U), разрешённое поле — с подавлением в тени: |B_r| − (1 − s_u)·min(|B_r|, U·B_conc) (разбор Codex);
-    // насыщение f ≤ 1 делит оба вклада поровну — доля не меняется
-    float quietShare(vec4 h) { float U = clamp(h.g, 0.0, 1.0), c = uCarpG * (1.0 - U), b = max(h.b, 0.0) * uBconcH, bs = b - (1.0 - uSuH) * min(b, U * uBconcH), w = 1.0 / (1.0 + pow(b / max(uBpl, 1.0), 4.0));
-      return c + bs > 1e-6 ? (c + bs * w) / (c + bs) : 1.0; }`;
   // узор сети ковра на видеокарте (автор: «а можно разрешение поднять этой текстуре?»): тот же Вороной по центрам на сфере, что прежде считал
   // процессор в 512×256 (вблизи — квадраты по 8,5 тыс. км; 2048×1024 процессор строит 0,8 с — заминка на каждой смене звезды). Центры —
   // в сетке кубов со стороной шага сети (текстура: куб × до K центров), ближайшие два — по 27 соседним кубам; сгустки — тот же шум
@@ -269,7 +285,25 @@
             vec3 dd = v - P.xyz; float q = dot(dd, dd); if (q < d1) { d2 = d1; d1 = q; } else if (q < d2) d2 = q; } } }
       float ns = 3.0 / uS0, cl = vnoise(v * ns), clump = 1.0 - uClump + uClump * 2.0 * clamp((cl - 0.35) / 0.4, 0.0, 1.0);
       float e = (sqrt(d2) - sqrt(d1)) / uS0; o0 = vec4(uFloor + exp(-(e / uLane) * (e / uLane)) * clump, 0.0, 0.0, 1.0); }`;
-  const CARP_FS = BAKE_HEAD + FH4_GLSL + `
+  // свет ковра — вдоль петель (после повышения разрешения узора): ковёр светит над основаниями, а петля длиной L соединяет основания через
+  // ячейку — свет растянут по её следу ≈ 2L/π. Прежде узор 512×256 случайно размывал свет на тексель (8,5 тыс. км — отсюда и квадраты);
+  // в 2048×1024 рисунок повторял нагрев: яркие границы ячеек и почти чёрные середины (5 %), медиана середины диска падала втрое. Теперь —
+  // гауссово размытие свечения у основания по сфере, два прохода. σ = L/6 — по виду (автор: «текстура поверхности контраст потеряла» при
+  // σ = L/2): близко к прежнему узору 512 (тексель 8,5 тыс. км), но без квадратов. Для справки — сверка с SDO в его разрешении: тёмные места
+  // сети p10 = 0,53 медианы диска при σ = L/2 (SDO 0,52), 0,43 при L/3, 0,33 при L/5 — контраст сети у нас выше солнечного
+  const CBLUR_FS = `precision highp float; precision highp sampler2D;
+    layout(location = 0) out vec4 o0;
+    uniform sampler2D uSrc; uniform vec2 uDir; uniform float uSig, uCW, uCH;
+    const float PI = 3.14159265359;
+    // проход — вдоль большого круга через точку (восток или север): у полюса выборка уходит через полюс по сфере (разбор Codex: прежний шаг
+    // по координатам текстуры у полюса повторял край)
+    vec2 uvOf(vec3 n) { return vec2(fract(atan(n.z, n.x) / (2.0 * PI) + 1.0), acos(clamp(n.y, -1.0, 1.0)) / PI); }
+    void main() { vec2 uv = gl_FragCoord.xy / vec2(uCW, uCH); vec4 c0 = texture(uSrc, uv); if (uSig <= 0.0) { o0 = c0; return; }
+      float th = PI * uv.y, ph = 2.0 * PI * uv.x; vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph)), e = cross(vec3(0.0, 1.0, 0.0), n);
+      e = length(e) > 1e-4 ? normalize(e) : vec3(1.0, 0.0, 0.0); vec3 dir = uDir.x > 0.5 ? e : normalize(cross(n, e)); float acc = 0.0, ws = 0.0;
+      for (int k = -6; k <= 6; k++) { float t = float(k) / 3.0, w = exp(-0.5 * t * t), a = t * uSig; acc += texture(uSrc, uvOf(cos(a) * n + sin(a) * dir)).x * w; ws += w; }
+      o0 = vec4(acc / ws, c0.yzw); }`;
+  const CARP_FS = BAKE_HEAD + `
     uniform sampler2D uNet; uniform float uCW, uCH, uCL, uNetK, uXL, uXNu, uWarm, uTWarm;
     void main() { vec2 ij = gl_FragCoord.xy; float ph = 2.0 * PI * ij.x / uCW, th = PI * ij.y / uCH; vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
       vec4 h4 = fh4(n); float F0 = max(h4.r, 0.0) * quietShare(h4), N = texture(uNet, vec2(ij.x / uCW, ij.y / uCH)).r * uNetK, F = F0 * N, Lh = 0.5 * uCL * uRcm, e0 = 0.0, He = 1e-4, eX = 0.0, HX = 1e-4;
@@ -292,7 +326,7 @@
   // ярок их переходный слой, где температура проходит через ≈ 1 МК при высоком давлении. Тепло проводится вниз: κ₀T^{5/2}·dT/ds = F_c ≈ F,
   // поэтому столб n_e²·ds = (n_e·T)²·κ₀·T^{1/2}/F·dT; свёртка с откликом R174 (гауссиана по lg T) — ln10·T₀^{3/2}·1,09·σ√(2π) ≈ 6,35·10⁸,
   // до 0,7·T_max (выше — корона петли, её считает своя часть); давление — RTV петли длиной uXL при местном нагреве
-  const MOSS_FS = BAKE_HEAD + FH4_GLSL + `
+  const MOSS_FS = BAKE_HEAD + `
     uniform sampler2D uNet; uniform float uCW, uCH, uXL, uNetK, uMossL, uMossFc;
     float ncdf(float z) { return 0.5 * (1.0 + tanh(0.7978845608 * (z + 0.044715 * z * z * z))); }
     void main() { vec2 ij = gl_FragCoord.xy; float ph = 2.0 * PI * ij.x / uCW, th = PI * ij.y / uCH; vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
@@ -601,10 +635,16 @@
     const fhTex = new THREE.DataTexture(new Float32Array(128 * 64), 128, 64, THREE.RedFormat, THREE.FloatType);
     Object.assign(fhTex, { wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, flipY: false, generateMipmaps: false });
     const uC = []; for (let i = 0; i < NCMAX; i++) uC.push(new THREE.Vector4());   // зарядов до NCMAX (256): пятна и площадки областей с изображениями
+    const shU = { carp: { value: 500 }, bconc: { value: 3000 }, su: { value: 0.1 } };   // общие для карты нагрева и проходов с разбивкой нагрева
     const bu = { uFH: { value: fhTex }, uFHW: { value: 128 }, uFHH: { value: 64 }, uLayer: { value: 0 }, uNr: { value: o.Nr }, uNt: { value: o.Nt }, uNp: { value: o.Np }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uRcm: { value: R }, uGM: { value: G * M }, uTopen: { value: o.Topen }, uNopen: { value: o.nOpen }, uBmin: { value: 1e-3 }, uStepMode: { value: 1 },
       uC: { value: uC }, uNC: { value: 0 }, uDip: { value: 0 }, uDipU: { value: 0 }, uGU: { value: 1 }, uDipM: { value: new THREE.Vector3(0, 1, 0) } };
-    bu.uWarmV = { value: o.warmV != null ? o.warmV : 0.1 }; bu.uTWarmV = { value: 1.1e6 };   // тёплая составляющая петель активных областей
+    // тёплая составляющая: прежняя — доля 0,1 у горячих петель при 1,1 МК; веера — по ползунку, по умолчанию 0 (автор: «было без вееров лучше»).
+    // Прежняя подгонка вееров (для справки): длина веера — от 30–80 тыс. км; доля вееров 0,5 —
+    // подгонка по снимку SDO в его разрешении на остановленном кадре: при 0,3 / 0,6 p95 диска 2,18 / 2,39 медианы (SDO 2,30), площадь ярче трёх
+    // медиан 1,8 / 2,8 % (SDO ≈ 2,7 %); другой момент (другие области на диске) сдвигает эти числа в полтора раза; доля ядер — по ползунку нет, 0 (была 0,02 — подгонка)
+    Object.assign(bu, { uCarpG: shU.carp, uBconcH: shU.bconc, uSuH: shU.su, uBpl: { value: o.bPlage != null ? o.bPlage : 50 }, uFanF: { value: o.fanF != null ? o.fanF : 0 }, uCoreF: { value: o.coreF != null ? o.coreF : 0 }, uWarmV: { value: o.warmV != null ? o.warmV : 0.1 },
+      uFanL0: { value: 3e9 }, uFanL1: { value: 8e9 }, uTWarmV: { value: 1.1e6 } });
     bu.uSW = { value: o.surfW }; bu.uSH = { value: o.surfH }; bu.uRc = { value: 1 + o.shell };
     bu.uSP = { value: new THREE.Vector4(halton(1, 2), halton(1, 3), halton(2, 2), halton(2, 3)) };   // точки двух отсчётов внутри ячейки
     // таблица столба R(ln A, u) = J4/(e₀·w) — по 5 узлам Гаусса — Лежандра (как прежде в шейдере), 64 × 32
@@ -641,7 +681,7 @@
     const makeHeat = (w, h) => new THREE.WebGLRenderTarget(w, h, { type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, stencilBuffer: false });
     const HW = o.heatW || Math.max(1024, o.surfW), HH = o.heatH || HW / 2, heatRT = makeHeat(HW, HH); let heat2 = null, heatCur = heatRT;
     const sp = [], spC = new Array(64).fill(2); for (let i = 0; i < 64; i++) sp.push(new THREE.Vector4());
-    const hu = { uW: { value: HW }, uH: { value: HH }, uBconc: { value: 3000 }, uCarpet: { value: 500 }, uDrv: { value: 3e3 }, uSu: { value: 0.1 }, uEtaEps: { value: 0 }, uSp: { value: sp }, uSpC: { value: spC }, uNS: { value: 0 },
+    const hu = { uW: { value: HW }, uH: { value: HH }, uBconc: shU.bconc, uCarpet: shU.carp, uDrv: { value: 3e3 }, uSu: shU.su, uEtaEps: { value: 0 }, uSp: { value: sp }, uSpC: { value: spC }, uNS: { value: 0 },
       uC: bu.uC, uNC: bu.uNC, uDip: bu.uDip, uDipU: bu.uDipU, uGU: bu.uGU, uDipM: bu.uDipM };   // поле — те же заряды, что в запекании
     const heatMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: HEAT_FS, uniforms: hu, depthTest: false, depthWrite: false });
     const hquad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), heatMat), hs = new THREE.Scene(); hquad.frustumCulled = false; hs.add(hquad);
@@ -662,14 +702,14 @@
     // проход материалом mat в цель rt целиком
     function pass(mat, rt) { const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(), ac = renderer.autoClear; quad.material = mat; renderer.autoClear = false;
       try { renderer.setRenderTarget(rt); renderer.render(qs, qc); } finally { quad.material = bakeMat; renderer.autoClear = ac; renderer.setRenderTarget(prev, face, mip); } }
-    let gridStale = false, inVer = 0;
+    let gridStale = false, inVer = 0, briVer = 0, heatVer = 0;   // версии: входы (форма плиток), яркость плиток, карта нагрева (слой ковра)
     function setInputs(C, fh, noGrid) {
       inUids = C.uids || null; inSet = new Set(inUids || []); inImg = !!C.img;   // для переноса оснований трубок (сопоставление зарядов и полюсов по uid — разбор Codex)
       const n = Math.min(NCMAX, C.length / 4); if (C.length / 4 > NCMAX) console.warn('corona: зарядов больше ' + NCMAX + ' — лишние отброшены');
       for (let i = 0; i < NCMAX; i++) uC[i].set(i < n ? C[i * 4] : 0, i < n ? C[i * 4 + 1] : 0, i < n ? C[i * 4 + 2] : 0, i < n ? C[i * 4 + 3] : 0);
       bu.uNC.value = n; bu.uDip.value = C.dip || 0; bu.uDipU.value = C.dipU || 0; bu.uGU.value = C.gUnit; if (C.dipM) bu.uDipM.value.fromArray(C.dipM);
       if (gridSurf > 0.5) { if (noGrid) gridStale = true; else { buildGrid(); gridStale = false; } }   // поле — в сетку (только для живой текстуры)
-      heatDirty = true; inVer++;   // нагрев сменился — яркость устарела; новая версия входов — форма всех плиток устарела
+      heatDirty = true; inVer++; briVer++; heatVer++;   // нагрев сменился — яркость устарела; новая версия входов — форма всех плиток устарела
       if (fh && fh.spots) {   // карта нагрева на видеокарте: {spots: [x, y, z, угловой радиус тени], Bconc, carpetG, vh, tanTheta, su, etaEps}
         const L = Math.min(64, fh.spots.length); for (let i = 0; i < 64; i++) { const q = fh.spots[i]; if (i < L) sp[i].set(q[0], q[1], q[2], q[3]); else sp[i].set(0, 1, 0, 0); }
         Object.assign(hu.uNS, { value: L }); hu.uBconc.value = fh.Bconc; hu.uCarpet.value = fh.carpetG; hu.uDrv.value = fh.vh * fh.tanTheta; hu.uSu.value = fh.su; hu.uEtaEps.value = fh.etaEps;
@@ -748,8 +788,8 @@
       const bVer = new Int32Array(NT).fill(-1), bT = new Float64Array(NT), bFade = new Uint8Array(NT);
       function brightTiles(all) { const now = performance.now(), d = Math.max(1, camS.length()), hz = visCos(d); cd.copy(camS).normalize(); let n = 0;
         for (let t = 0; t < NT; t++) { let need = all;
-          if (!need && valid[t] && active(t) && tDir[t].dot(cd) > hz) { if (bVer[t] !== inVer || bFade[t]) need = true; else for (let p = 0; p < 4 && !need; p++) if (twData[wIdx(t, p)] < 2 || tAge[t * 4 + p] > bT[t]) need = true; }
-          visData[t] = need ? 255 : 0; if (need) { bVer[t] = inVer; bT[t] = now; let f = 0; for (let p = 0; p < 4; p++) if (twData[wIdx(t, p)] < 2) f = 1; bFade[t] = f; n++; } }
+          if (!need && valid[t] && active(t) && tDir[t].dot(cd) > hz) { if (bVer[t] !== briVer || bFade[t]) need = true; else for (let p = 0; p < 4 && !need; p++) if (twData[wIdx(t, p)] < 2 || tAge[t * 4 + p] > bT[t]) need = true; }
+          visData[t] = need ? 255 : 0; if (need) { bVer[t] = briVer; bT[t] = now; let f = 0; for (let p = 0; p < 4; p++) if (twData[wIdx(t, p)] < 2) f = 1; bFade[t] = f; n++; } }
         visTex.needsUpdate = true; return n; }
       function brightTilesR() { const n = brightTiles(false); if (n) passIn(sbriMat, bri, rects(visData), false); return n; }
       // присутствие подробного слоя: в области и готова — растёт, иначе падает; вышла из области — форма недействительна (войдёт — заново)
@@ -902,7 +942,7 @@
       tubes.ramp = Math.min(1, Math.max(0, tubes.ramp + (tubes.want ? 1 : -1) * dt / 2)); if (!tubes.want && tubes.ramp <= 0) tubes.on = false; ru.uTRamp.value = tubes.ramp; }
     function render(camera, wForce, target, time) {
       if (!target) tubeRamp();
-      if (!S.baked) return 0; carpFrame(); if (time != null) ru.uTime.value = time; const w = wForce != null ? wForce : weight(camera); if (w <= 0.001) return 0;
+      if (!S.baked) return 0; if (time != null) ru.uTime.value = time; const w = wForce != null ? wForce : weight(camera); if (w <= 0.001) return 0; carpFrame();
       if (ru.uFurSig.value !== furSigN) { furSigN = ru.uFurSig.value; ru.uFurNorm.value = furNorm(furSigN); }
       const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(), ac = renderer.autoClear;
       setCam(camera); ru.uW.value = w; renderer.autoClear = false;
@@ -1203,7 +1243,7 @@
         slots: sl.map(S => ({ k: S.k, gen: S.gen, wk: S.wk, L: S.Lr, T0: S.T0, FA: S.FA, FB: S.FB, t: S.t, lag: S.lag, blend: S.blend, N: S.N, Tmax: S.tot && S.tot.Tmax, dMass: S.tot && S.tot.dMass, heatErr: S.tot && S.t > 0 ? S.tot.heat / (S.t * S.tot.heatIn) - 1 : null })) }; }
     // ---- магнитный ковёр: узор сети (ячейки супергрануляции — Вороной по случайным центрам на сфере с шагом net, нагрев — на границах ячеек:
     // там собираются мелкие элементы поля) и слой ковра (проход CARP_FS — каждый кадр, по живой карте нагрева)
-    const carp = { on: false, L: o.carpL || 0.03, net: o.carpNet || 0.043, lane: o.carpLane || 0.25, floor: o.carpFloor != null ? o.carpFloor : 0.05, clump: o.carpClump != null ? o.carpClump : 1, seed: o.carpSeed || 7, xL: o.carpXL || 0.3, xNu: o.carpXNu != null ? o.carpXNu : 1.5, moss: o.moss !== false, mossL: o.mossL || 0.08, mossFc: o.mossFc || 0.5, warm: o.warm != null ? o.warm : 0 };   // тёплая — вдоль настоящих линий (объём и текстура, bu.uWarmV); в слое у поверхности — только для проверки   // по снимку SDO/AIA 171 (16.10.2026): ν = 1,5 — профиль над краем; фон ячейки 0,05 и сгустки 1 — контраст сети
+    const carp = { on: false, L: o.carpL || 0.03, net: o.carpNet || 0.043, lane: o.carpLane || 0.25, floor: o.carpFloor != null ? o.carpFloor : 0.05, clump: o.carpClump != null ? o.carpClump : 1, seed: o.carpSeed || 7, xL: o.carpXL || 0.3, xNu: o.carpXNu != null ? o.carpXNu : 1.5, moss: o.moss !== false, mossL: o.mossL || 0.08, mossFc: o.mossFc || 0.5, warm: o.warm != null ? o.warm : 0 };   // тёплая — вдоль настоящих линий (объём и текстура: веера и ядра, bu.uFanF и uCoreF); в слое у поверхности — только для проверки   // по снимку SDO/AIA 171 (16.10.2026): ν = 1,5 — профиль над краем; фон ячейки 0,05 и сгустки 1 — контраст сети
     // разрешение узора и слоёв ковра и мха (автор: «а можно разрешение поднять этой текстуре?»): 2048×1024 — ≈ 2 тыс. км у экватора Солнца,
     // ≈ 14 текселей на ячейку сети (было 512×256 — 3,5)
     const CW = o.carpW || 2048, CH = CW / 2, hfRT = (w, h) => new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, depthBuffer: false, stencilBuffer: false });
@@ -1226,13 +1266,23 @@
       nu.uWH.value.set(512, 256); pass(netMat, netLo); const lo = new Float32Array(512 * 256 * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(netLo); renderer.getContext().readPixels(0, 0, 512, 256, 0x1908, 0x1406, lo); renderer.setRenderTarget(prev);
       let sum = 0, wsum = 0; for (let y = 0; y < 256; y++) { const w = Math.sin(Math.PI * (y + 0.5) / 256); for (let x = 0; x < 512; x++) { sum += lo[(y * 512 + x) * 4] * w; wsum += w; } }
       netK = wsum > 0 && sum > 0 ? wsum / sum : 1; nu.uWH.value.set(CW, CH); pass(netMat, netRT); }
-    const carpRT = hfRT(CW, CH);
-    const cu = Object.assign({}, bu, { uNet: { value: netTex }, uCW: { value: CW }, uCH: { value: CH }, uCL: { value: carp.L }, uNetK: { value: 1 }, uXL: { value: carp.xL }, uXNu: { value: carp.xNu }, uMossL: { value: carp.mossL }, uMossFc: { value: carp.mossFc }, uWarm: { value: carp.warm }, uTWarm: { value: 1.1e6 }, uCarpG: hu.uCarpet, uBconcH: hu.uBconc, uSuH: hu.uSu, uBpl: { value: o.bPlage != null ? o.bPlage : 50 } });
+    const carpRT = hfRT(CW, CH), carpTmp = hfRT(CW, CH), carpOut = hfRT(CW, CH);
+    const cu = Object.assign({}, bu, { uNet: { value: netTex }, uCW: { value: CW }, uCH: { value: CH }, uCL: { value: carp.L }, uNetK: { value: 1 }, uXL: { value: carp.xL }, uXNu: { value: carp.xNu }, uMossL: { value: carp.mossL }, uMossFc: { value: carp.mossFc }, uWarm: { value: carp.warm }, uTWarm: { value: 1.1e6 } });
     const carpMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: CARP_FS, uniforms: cu, depthTest: false, depthWrite: false });
     const mossRT = hfRT(CW, CH);
     const mossMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: MOSS_FS, uniforms: cu, depthTest: false, depthWrite: false });
+    const blu = { uSrc: { value: null }, uDir: { value: new THREE.Vector2(1, 0) }, uSig: { value: 0 }, uCW: { value: CW }, uCH: { value: CH } };
+    const blurMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: CBLUR_FS, uniforms: blu, depthTest: false, depthWrite: false });
     let netMade = false;
-    function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; } cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; cu.uMossL.value = carp.mossL; cu.uMossFc.value = carp.mossFc; cu.uWarm.value = carp.warm; pass(carpMat, carpRT); ru.uCarp.value = carpRT.texture; ru.uNet2.value = netTex; ru.uNetK2.value = netK;
+    // разбор Codex (цена): проходы ковра и мха — только при новой карте нагрева или настройках ковра (на паузе и в неподвижном кадре — прежние)
+    let carpKey = '', carpShown = null;
+    // потеря контекста видеокарты (разбор Codex): после восстановления — узор и слой ковра заново
+    const onRestore = () => { netMade = false; carpKey = ''; }; renderer.domElement.addEventListener('webglcontextrestored', onRestore);
+    function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; carpKey = ''; }
+      const key = heatVer + '|' + JSON.stringify(carp) + '|' + netK; if (key === carpKey) return; carpKey = key; cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; cu.uMossL.value = carp.mossL; cu.uMossFc.value = carp.mossFc; cu.uWarm.value = carp.warm; pass(carpMat, carpRT);
+      blu.uSig.value = carp.blur != null ? carp.blur : carp.L / 6;
+      if (blu.uSig.value > 0) { blu.uSrc.value = carpRT.texture; blu.uDir.value.set(1, 0); pass(blurMat, carpTmp); blu.uSrc.value = carpTmp.texture; blu.uDir.value.set(0, 1); pass(blurMat, carpOut); carpShown = carpOut; }
+      else carpShown = carpRT; ru.uCarp.value = carpShown.texture; ru.uNet2.value = netTex; ru.uNetK2.value = netK;
       ru.uCarpRs.value = 1 + 6 * carp.L / Math.PI; ru.uExtRs.value = 1 + 6 * 0.5 * KB * 2e6 * R / (MU * MP * G * M); ru.uMossRs.value = 1 + 6 * ru.uMossH.value;
       if (carp.moss) { pass(mossMat, mossRT); ru.uMoss.value = mossRT.texture; } else ru.uMoss.value = blackTex; }
     const blackTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat); blackTex.needsUpdate = true;
@@ -1253,8 +1303,10 @@
     // слой k объёма (для проверок): Float32Array Nφ·Nθ·4 — свечение, метка основания
     function readLayer(k) { const buf = new Float32Array(o.Np * o.Nt * 4), prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel();
       renderer.setRenderTarget(vols[iF], k, 0); renderer.getContext().readPixels(0, 0, o.Np, o.Nt, 0x1908, 0x1406, buf); renderer.setRenderTarget(prev, face, mip); return buf; }
-    function dispose() { carpRT.dispose(); carpMat.dispose(); netRT.dispose(); netLo.dispose(); netMat.dispose(); if (sitesTex) sitesTex.dispose(); mossRT.dispose(); mossMat.dispose(); blackTex.dispose(); hyd.w.forEach(W => W.w && W.w.terminate()); hyd.w = []; hProfTex.dispose(); hTabTex.dispose(); [tLen, tGas, tLum, tPA, tPB].forEach(r => r.dispose()); tLumMat.dispose(); if (tubes.acc) tubes.acc.dispose(); tSeed.dispose(); [tLenMat, tPtMat, tGasMat, tRenMat].forEach(m => m.dispose()); tGeo.dispose(); base.dispose(); if (detail) detail.dispose(); JL.dispose(); geos.forEach(v => v.dispose()); emitMat.dispose(); if (halfRT) halfRT.dispose(); upMat.dispose(); uq.geometry.dispose(); gridRT.dispose(); gridMat.dispose(); heatRT.dispose(); if (heat2) heat2.dispose(); heatMat.dispose(); hquad.geometry.dispose(); vols.forEach(v => v.dispose()); fhTex.dispose(); bakeMat.dispose(); rayMat.dispose(); quad.geometry.dispose(); rq.geometry.dispose(); }
-    return { maxCharges: () => NCMAX, setTone: v => { ru.uTone.value = v ? 1 : 0; }, setChrom, chrom: () => Object.assign({}, chrom, { H_R: ru.uChH.value.toArray(), tau0: ru.uChT0.value.toArray() }), setTubes: v => { tubes.want = !!v; if (v) tubes.on = true; }, setTubeDim: k => { ru.uTK.value = Math.min(1, Math.max(0, +k || 0)); }, setCarpet, carpet: () => Object.assign({}, carp), readMoss: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(mossRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, readNet: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(netRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return { b, CW, CH }; }, readCarp: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(carpRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, setHydro, hydroTick, hydroStatus, hydroFrozen: hydFrozen, setHydroRate: r => { hyd.rate = Math.max(1, Math.min(1000, +r || 30)); },
+    function dispose() { renderer.domElement.removeEventListener('webglcontextrestored', onRestore); carpTmp.dispose(); carpOut.dispose(); blurMat.dispose(); carpRT.dispose(); carpMat.dispose(); netRT.dispose(); netLo.dispose(); netMat.dispose(); if (sitesTex) sitesTex.dispose(); mossRT.dispose(); mossMat.dispose(); blackTex.dispose(); hyd.w.forEach(W => W.w && W.w.terminate()); hyd.w = []; hProfTex.dispose(); hTabTex.dispose(); [tLen, tGas, tLum, tPA, tPB].forEach(r => r.dispose()); tLumMat.dispose(); if (tubes.acc) tubes.acc.dispose(); tSeed.dispose(); [tLenMat, tPtMat, tGasMat, tRenMat].forEach(m => m.dispose()); tGeo.dispose(); base.dispose(); if (detail) detail.dispose(); JL.dispose(); geos.forEach(v => v.dispose()); emitMat.dispose(); if (halfRT) halfRT.dispose(); upMat.dispose(); uq.geometry.dispose(); gridRT.dispose(); gridMat.dispose(); heatRT.dispose(); if (heat2) heat2.dispose(); heatMat.dispose(); hquad.geometry.dispose(); vols.forEach(v => v.dispose()); fhTex.dispose(); bakeMat.dispose(); rayMat.dispose(); quad.geometry.dispose(); rq.geometry.dispose(); }
+    // веера и ядра областей: доли тёплой составляющей (стенд, ползунки); яркость объёма — пересчитать на следующем кадре и на паузе
+    function setFans(v) { if (v && v.fanF != null) bu.uFanF.value = Math.max(0, +v.fanF); if (v && v.coreF != null) bu.uCoreF.value = Math.max(0, +v.coreF); heatDirty = true; briVer++; }   // разбор Codex: и яркость плиток текстуры (на паузе)
+    return { maxCharges: () => NCMAX, setFans, fans: () => ({ fanF: bu.uFanF.value, coreF: bu.uCoreF.value }), setTone: v => { ru.uTone.value = v ? 1 : 0; }, setChrom, chrom: () => Object.assign({}, chrom, { H_R: ru.uChH.value.toArray(), tau0: ru.uChT0.value.toArray() }), setTubes: v => { tubes.want = !!v; if (v) tubes.on = true; }, setTubeDim: k => { ru.uTK.value = Math.min(1, Math.max(0, +k || 0)); }, setCarpet, carpet: () => Object.assign({}, carp), readMoss: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(mossRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, readNet: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(netRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return { b, CW, CH }; }, readCarp: () => { const b = new Float32Array(CW * CH * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(carpShown || carpRT); renderer.getContext().readPixels(0, 0, CW, CH, 0x1908, 0x1406, b); renderer.setRenderTarget(prev); return b; }, setHydro, hydroTick, hydroStatus, hydroFrozen: hydFrozen, setHydroRate: r => { hyd.rate = Math.max(1, Math.min(1000, +r || 30)); },
       _tubes: () => ({ tru, tRenMat, tMesh, tScene, tGeo, camL, T, phiP, phiN, mixP, mixN, lamPole, lumBuf, lam0: () => lam0, omMax: omMaxLast, slotsFree: sFree.length }), setTubeFill: f => { tru.uFill.value = Math.min(1, Math.max(0.005, f)); },
       tubesDebug: () => { const prev = renderer.getRenderTarget(), gl = renderer.getContext(), pa = new Float32Array(TM * TN * 4); renderer.setRenderTarget(tPA); gl.readPixels(0, 0, TM, TN, 0x1908, 0x1406, pa);
         let acc = null; if (tubes.acc) { acc = new Float32Array(tubes.acc.width * tubes.acc.height * 4); renderer.setRenderTarget(tubes.acc); gl.readPixels(0, 0, tubes.acc.width, tubes.acc.height, 0x1908, 0x1406, acc); }

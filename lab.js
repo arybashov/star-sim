@@ -34,7 +34,9 @@
       ['labChH', 'плотная хромосфера: шкала высот, тыс. км у Солнца (≈ 1; у звезды — × g☉/g★)', 0.2, 4, 0.05],
       ['labChSE', 'лес спикул: высота, где он непрозрачен по касательной, тыс. км у Солнца (подгонка по SDO — 12; 0 — без него)', 0, 20, 0.5],
       ['labChSH', 'лес спикул: шкала высот, тыс. км у Солнца (подгонка — 5)', 0.5, 10, 0.1],
-      ['labXNu', 'протяжённая спокойная корона: плотность × RTV (Солнце 1 — по снимку SDO; по умолчанию 1,5)', 0.3, 3, 0.05]]],
+      ['labXNu', 'протяжённая спокойная корона: плотность × RTV (Солнце 1 — по снимку SDO; по умолчанию 1,5)', 0.3, 3, 0.05],
+      ['labFanF', 'веера петель активных областей (≈ 1 МК на краях областей): доля (0 — без вееров, как решил автор; при 0,5 — засветка)', 0, 2, 0.05],
+      ['labCarpBlur', 'магнитный ковёр: размытие света вдоль петель, доля длины петли (0,17 — по виду; 0,5 — как на SDO, но сеть бледнее)', 0, 1, 0.01]]],
     ['Плавание пятен', [['labProtD', 'вращение звезды: период, сут (0 — стоит; Проксима 83,1)', 0, 200, 0.1], ['labOmEq', 'экватор быстрее системы, рад/сут', -0.02, 0.02, 0.001],
       ['labDOm', 'дифференциальное вращение ΔΩ экв.−полюс, рад/сут (Солнце 0,042; у M-карликов не измерено)', -0.06, 0.06, 0.001], ['labVmer', 'меридиональное течение к полюсам, м/с (не измерено)', -20, 20, 0.5],
       ['labDspot', 'случайное блуждание пятен, км²/с (не измерено)', 0, 10, 0.1], ['labOuH', 'блуждание: время памяти скорости, ч', 2, 96, 1], ['pairRigid', 'пара после расхождения — целиком', 0, 1, 1]]],
@@ -70,7 +72,7 @@
   // физика по литературе: плазма частицами по нитям поля 1/r² (погружённые заряды), поверхность источника 2,5 R★, слабый фон
   // открытого поля, полюса дрейфуют, как в сцене автора (DOC «Вспышки…», «Сравнение с литературой»)
   const PHYS = { archMode: 3, falloff: 2, open: 0, rSS: 2.5, surface: 1, pTrail: 0, pSize: 0.008, pBright: 2.5, pN: 30000, heat: 0.2, dipoleG: 25,
-    bright: 0.6, rim: 0, rimPow: 4, granPhys: 1, labPhysics: 1, spreadKm2s: 250, labEye: 1, pairRigid: 1, driftKms: 0, labChH: 1, labChE: 4, labChSH: 5, labChSE: 12, labPlageF: 1, labPlageD: 0, labXNu: 1.5 };   // диполь 25 Гс — Барнард: продольное поле 6,9 Гс скв. (Donati et al. 2023, SPIRou) → полюс ≈ 20–25 Гс; нагрев 0,2 — средняя T короны ≈ 1,9 МК (Барнард: L_X ≈ 10²⁶ → T̄ ≈ 1,8 МК, Johnstone & Güdel 2015); точки без хвостов (автор: хвосты портят картину)   // open 0 — суммарный поток звезды нулевой (полюса уничтожают друг друга)
+    bright: 0.6, rim: 0, rimPow: 4, granPhys: 1, labPhysics: 1, spreadKm2s: 250, labEye: 1, pairRigid: 1, driftKms: 0, labChH: 1, labChE: 4, labChSH: 5, labChSE: 12, labPlageF: 1, labPlageD: 0, labXNu: 1.5, labFanF: 0, labCarpBlur: 0.17 };   // диполь 25 Гс — Барнард: продольное поле 6,9 Гс скв. (Donati et al. 2023, SPIRou) → полюс ≈ 20–25 Гс; нагрев 0,2 — средняя T короны ≈ 1,9 МК (Барнард: L_X ≈ 10²⁶ → T̄ ≈ 1,8 МК, Johnstone & Güdel 2015); точки без хвостов (автор: хвосты портят картину)   // open 0 — суммарный поток звезды нулевой (полюса уничтожают друг друга)
   const st = Object.assign({ mode: 'star', sp: 'M4V', comp: 0, name: 'Барнард', R: 0.187, M: 0.162, seed: 101, star: {}, sn: {}, arches: true, flares: true, cme: true, earth: false, speed: 1, glow: true, glowK: 0.9, glowT: 0.95, glowR: 0.5 },
     (() => { try { return JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { return {}; } })());
   if ((st.hou | 0) < 9) { delete st.star.poleDrift; delete st.star.surfH; delete st.star.corrH; st.star = Object.assign({}, st.star, PHYS); st.hou = 9; }   // один раз: плазма, самостоятельные полюса, 1 с = сутки
@@ -152,9 +154,13 @@
   if ((st.hou | 0) < 63) { if (st.name === 'Солнце') Object.assign(st.star, { pairQLo: 0.5, pairQHi: 10 }); st.hou = 63; }
   // протяжённая спокойная корона: у Солнца ν = 1 (сверка с SDO в линейной яркости), у других звёзд — прежние 1,5
   if ((st.hou | 0) < 64) { st.star.labXNu = st.name === 'Солнце' ? 1 : 1.5; st.hou = 64; }
+  if ((st.hou | 0) < 65) { st.star.labFanF = 0.5; st.hou = 65; }   // веера петель активных областей
+  // автор: «было без вееров лучше — и текстура поверхности контраст потеряла — и прямо огромные области засветки»: веера выключены, сеть резче
+  if ((st.hou | 0) < 66) { st.star.labFanF = 0; st.star.labCarpBlur = 0.17; st.hou = 66; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
-      if (corona.setCarpet) corona.setCarpet({ xNu: e.labXNu != null ? e.labXNu : 1.5 }); } }
+      const cL = corona.carpet ? corona.carpet().L : 0.03;
+      if (corona.setCarpet) corona.setCarpet({ xNu: e.labXNu != null ? e.labXNu : 1.5, blur: (e.labCarpBlur != null ? e.labCarpBlur : 0.17) * cL }); if (corona.setFans) corona.setFans({ fanF: e.labFanF != null ? e.labFanF : 0 }); } }
 
   // ---- сцена
   const view = $('view'), renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
@@ -333,7 +339,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     const el = e.target; if (!el.dataset.k) return;
     const k = el.dataset.k, w = el.dataset.w, v = +el.value; (w === 'sn' ? st.sn : st.star)[k] = v; $(el.id + 'o').textContent = fmt(v);
     if (w === 'sn') { if (SM.SN_GEOM.includes(k)) rebuild(); else if (sn) sn.setLook({ [k]: v }); }
-    else if (/^labCh/.test(k)) applyChrom(); else if (k === 'labPlageF' || k === 'labPlageD') { if (corona) corona.inputs(...coronaInputs()); } else if (k === 'labXNu') applyChrom(); else if (SM.GEOM.includes(k)) rebuild(); else star.setLook({ [k]: v });
+    else if (/^labCh/.test(k)) applyChrom(); else if (k === 'labPlageF' || k === 'labPlageD') { if (corona) corona.inputs(...coronaInputs()); } else if (k === 'labXNu' || k === 'labFanF' || k === 'labCarpBlur') applyChrom(); else if (SM.GEOM.includes(k)) rebuild(); else star.setLook({ [k]: v });
     if (k === 'cycle' || k === 'snCycle') $('scrub').max = v;
     save();
   });
