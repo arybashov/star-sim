@@ -361,8 +361,17 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   $('euvS').value = Math.log2(euvGrid().surfW); $('euvS').addEventListener('input', e => { st.euvS = +e.target.value; euvLabel(); save(); clearTimeout(euvT); euvT = setTimeout(() => { buildCorona(); }, 250); });
   document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
     st.mode = b.dataset.mode; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-    orbit.dist = st.mode === 'sn' ? 45 : 6.2; t = 0; groups(); build(); }));
+    orbit.dist = st.mode === 'sn' ? 45 : 6.2; t = 0; evActive = false; evBtn(); groups(); build(); }));   // смена режима — событие кончилось (разбор Codex)
   $('play').addEventListener('click', () => { playing = !playing; $('play').textContent = playing ? 'Пауза' : 'Пуск'; });
+  // событие — по кнопке (автор: «надо кнопку, по которой начинается»): идёт с нуля один раз, на это время поверхность стоит; выключатели
+  // «вспышка» и «выброс» — что показать в событии (ни одного — кнопка включает оба); ещё раз — остановить
+  let evActive = false;
+  const evBtn = () => { $('evStart').textContent = evActive ? '■ остановить' : '▶ начать'; $('evStart').disabled = st.mode === 'sn'; };   // у сверхновой — нет
+  evBtn();
+  $('evStart').addEventListener('click', () => {
+    if (evActive) { evActive = false; t = 0; evBtn(); return; }
+    if (!st.flares && !st.cme) { $('optFlares').click(); $('optCme').click(); }
+    evActive = true; t = 0; if (!playing) $('play').click(); evBtn(); });
   $('speed').value = st.speed; $('speedO').textContent = st.speed; $('speed').addEventListener('input', e => { st.speed = +e.target.value; $('speedO').textContent = st.speed; save(); });
   $('scrub').addEventListener('input', e => { t = +e.target.value; });
   $('reseed').addEventListener('click', () => { st.seed = (Math.random() * 1e9) | 0; build(); });
@@ -436,8 +445,9 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     const dtW = (now - last) / 1000; last = now; const dtPh = dtW > 1 ? 0 : dtW, dt = Math.min(0.1, dtPh);
     const cyc = st.mode === 'sn' ? effSn().snCycle : effStar().cycle;
     // событие — вспышка или выброс (разбор Codex): поле на время события — снимок, поверхность стоит (звезда не поворачивается), идут часы события
-    const evOn = st.mode !== 'sn' && (st.flares || st.cme);
-    if (playing) { t = (t + dt * st.speed) % cyc; if (!evOn) simT += dtPh * st.speed; $('scrub').value = t; }
+    if (playing) { if (evActive) { t += dt * st.speed; if (t >= cyc) { evActive = false; t = 0; evBtn(); } } else t = (t + dt * st.speed) % cyc; }   // событие — один раз
+    const evOn = st.mode !== 'sn' && evActive && (st.flares || st.cme);   // после проверки конца события (разбор Codex: иначе лишний кадр с t = 0)
+    if (playing) { if (!evOn) simT += dtPh * st.speed; $('scrub').value = t; }
     $('scrubO').textContent = t.toFixed(1); $('scrub').max = cyc;
     const px = view.clientHeight / (2 * Math.tan(cam.fov * Math.PI / 360));
     // камера — до обновления звезды (уровень детализации берёт её положение)
@@ -449,7 +459,7 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     const ev = corona && corona.setEvent ? corona.setEvent(evOn && star.poles.length >= 2 ? { t, cyc, tDyn: effStar().tDyn, flare: !!st.flares, cme: !!st.cme, P0: star.poles[0].p, P1: star.poles[1].p, rope: star.rope } : null) : null;
     cpu.update = cpu.update * 0.9 + (performance.now() - tu0) * 0.1; cpu.frame = cpu.frame * 0.95 + dtW * 1000 * 0.05;   // камера — в системе звезды (вращение)   // камера — в системе звезды (группа в начале координат); реальное время кадра — для детализации на паузе
     if (now - lastStats > 1000) { lastStats = now; stats(); }
-    let ph = f.flash > 0.02 ? 'вспышка' : t < 9 && star.show.cme ? 'выброс' : 'спокойно';
+    let ph = 'спокойно';   // прежний сценарный цикл модели звезды в строке не показывается: событие — по кнопке
     if (ev) ph = (st.flares && st.cme ? 'вспышка и выброс' : st.flares ? 'вспышка' : 'выброс') + ` · ${Math.floor(ev.tau / 60)} мин после начала (поверхность стоит)`;
     if (sn) { const s = sn.update(t, px, 1); star.group.scale.setScalar(Math.max(1e-4, s.starScale)); star.group.visible = s.starScale > 0.002; star.setLook({ bright: effStar().bright * s.boost });
       ph = t < effSn().collapseAt ? 'перед коллапсом' : t < effSn().collapseAt + 3 ? 'коллапс, ударная волна' : 'расширение выброса'; }
