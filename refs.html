@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Звезда — ориентиры вида</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&display=swap">
+<style>
+  /* Подборка реальных снимков атмосферы Солнца — ориентиры вида для стенда звезды (жёсткая научная фантастика: только данные
+     инструментов и фотографии, без рисунков — решение автора). Снимки — с серверов NASA, ESA, NOIRLab; права — у авторов (подписи) */
+  :root { --space: #04070b; --panel: #0b1219; --line: #1d2a36; --ink: #d9e2ea; --dim: #8496a6; --acc: #e3b673; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--space); color: var(--ink); font: 14px/1.5 "Golos Text", system-ui, sans-serif; }
+  main { max-width: 1400px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
+  .lead { color: var(--dim); margin: 0 0 18px; max-width: 900px; }
+  h2 { font-size: 15px; color: var(--acc); margin: 26px 0 4px; font-weight: 600; }
+  .sec { color: var(--dim); margin: 0 0 10px; max-width: 900px; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  figure a.img { display: block; background: #000; aspect-ratio: 1 / 1; }
+  figure.wide a.img { aspect-ratio: 16 / 9; }
+  figure img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  figcaption { padding: 8px 10px 10px; font-size: 13px; }
+  figcaption b { font-weight: 600; }
+  .take { color: var(--acc); display: block; margin-top: 4px; }
+  .src { color: var(--dim); font-size: 12px; display: block; margin-top: 4px; }
+  .src a { color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Как выглядит атмосфера звезды — ориентиры</h1>
+  <p class="lead">Только реальные снимки Солнца — единственной звезды, атмосферу которой видно в деталях; рисунков нет. Под каждым: что на снимке и что из него берём в модель стенда. Клик — снимок в полном размере на сайте источника.</p>
+
+  <h2>Ультрафиолет — корона по температурам (SDO/AIA, снимки этой недели)</h2>
+  <p class="sec">Каждый канал видит свою температуру: петли, дымка над активными областями, тёмные корональные дыры, веера. Цвета — условные (приняты в NASA для каждого канала).</p>
+  <div class="grid">
+    <figure><a class="img" href="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_2048_0171.jpg" target="_blank"><img loading="lazy" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg" alt="SDO AIA 171"></a>
+      <figcaption><b>171 Å — ≈ 0,6 МК.</b> Петли видны отдельными нитями, над лимбом — арки и веера. <span class="take">Модель: яркие динамические трубки (этап 3) — вот так.</span><span class="src">NASA/SDO/AIA</span></figcaption></figure>
+    <figure><a class="img" href="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_2048_0193.jpg" target="_blank"><img loading="lazy" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg" alt="SDO AIA 193"></a>
+      <figcaption><b>193 Å — ≈ 1,5 МК.</b> Диффузная корона: светлая дымка над активными областями, тёмные корональные дыры над открытым полем. <span class="take">Модель: объёмная «спокойная» атмосфера — это главный слой картинки.</span><span class="src">NASA/SDO/AIA</span></figcaption></figure>
+    <figure><a class="img" href="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_2048_0211.jpg" target="_blank"><img loading="lazy" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg" alt="SDO AIA 211"></a>
+      <figcaption><b>211 Å — ≈ 2 МК.</b> Активные области — горячие ядра, вокруг — рассеянное свечение. <span class="take">Модель: нагрев, собранный в активных областях (сейчас «ковёр» размазывает его).</span><span class="src">NASA/SDO/AIA</span></figcaption></figure>
+    <figure><a class="img" href="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_2048_0304.jpg" target="_blank"><img loading="lazy" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg" alt="SDO AIA 304"></a>
+      <figcaption><b>304 Å — ≈ 50 000 K.</b> Хромосфера и переходный слой: сеть, «трава» спикул на лимбе, протуберанцы и волокна. <span class="take">Модель: хромосферный слой и холодные сгустки (дождь, протуберанцы).</span><span class="src">NASA/SDO/AIA</span></figcaption></figure>
+    <figure><a class="img" href="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_2048_0131.jpg" target="_blank"><img loading="lazy" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg" alt="SDO AIA 131"></a>
+      <figcaption><b>131 Å — ≈ 10 МК (вспышки).</b> В покое тёмный, во вспышку — ослепительные ядра и петли после вспышки. <span class="take">Модель: вспышки — импульсный нагрев трубок.</span><span class="src">NASA/SDO/AIA</span></figcaption></figure>
+    <figure><a class="img" href="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_2048_211193171.jpg" target="_blank"><img loading="lazy" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_211193171.jpg" alt="SDO AIA 211/193/171"></a>
+      <figcaption><b>Смесь 211 / 193 / 171.</b> Три температуры в одном кадре — каждая своим цветом. <span class="take">Модель: «вид через прибор» — цвет по температуре газа.</span><span class="src">NASA/SDO/AIA</span></figcaption></figure>
+    <figure><a class="img" href="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_2048_HMIIC.jpg" target="_blank"><img loading="lazy" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIC.jpg" alt="SDO HMI continuum"></a>
+      <figcaption><b>Видимый свет (HMI).</b> Что видит глаз: диск, потемнение к краю, пятна. <span class="take">Модель: фотосфера — она у нас уже есть.</span><span class="src">NASA/SDO/HMI</span></figcaption></figure>
+  </div>
+
+  <h2>Корона в высоком разрешении и рентгене</h2>
+  <div class="grid">
+    <figure><a class="img" href="https://www.esa.int/ESA_Multimedia/Images/2022/03/The_Sun_in_high_resolution" target="_blank"><img loading="lazy" src="https://www.esa.int/var/esa/storage/images/esa_multimedia/images/2022/03/the_sun_in_high_resolution/24010613-1-eng-GB/The_Sun_in_high_resolution_pillars.jpg" alt="Solar Orbiter EUI"></a>
+      <figcaption><b>Solar Orbiter, 17 нм, 83 млн пикселей.</b> Над лимбом корона — «мех» из тонких лучей и арок, уходящих в стримеры. <span class="take">Модель: объём + трубки дают и диффузное свечение, и тонкую структуру.</span><span class="src">ESA / NASA / Solar Orbiter / EUI Team / E. Kraaikamp (ROB)</span></figcaption></figure>
+    <figure><a class="img" href="https://www.esa.int/ESA_Multimedia/Images/2007/03/Solar_corona_as_imaged_by_Hinode" target="_blank"><img loading="lazy" src="https://www.esa.int/var/esa/storage/images/esa_multimedia/images/2007/03/solar_corona_as_imaged_by_hinode/9610357-3-eng-GB/Solar_corona_as_imaged_by_Hinode_pillars.jpg" alt="Hinode XRT"></a>
+      <figcaption><b>Рентген (Hinode XRT).</b> Горячая корона 2–20 МК: яркие точки, петли активных областей, всё остальное темно. <span class="take">Модель: этим светом и меряется L_X Проксимы.</span><span class="src">JAXA / NASA / NAOJ / ESA</span></figcaption></figure>
+    <figure><a class="img" href="https://noirlab.edu/public/images/NSO-DKIST-first-sunspot/" target="_blank"><img loading="lazy" src="https://storage.noirlab.edu/media/archives/images/screen/NSO-DKIST-first-sunspot.jpg" alt="DKIST sunspot"></a>
+      <figcaption><b>Пятно крупным планом (телескоп Иноуэ, 4 м).</b> Тень, полутень из волокон, гранулы вокруг. <span class="take">Модель: вид вплотную к поверхности.</span><span class="src">NSO / AURA / NSF</span></figcaption></figure>
+  </div>
+
+  <h2>Белый свет: затмения и коронографы</h2>
+  <p class="sec">Корона в рассеянном свете фотосферы: жемчужная, со стримерами и лучами; розовые протуберанцы на краю (водород, Hα).</p>
+  <div class="grid">
+    <figure><a class="img" href="https://science.nasa.gov/image-article/apod-2019-july-1-the-big-corona/" target="_blank"><img loading="lazy" src="https://assets.science.nasa.gov/content/dam/science/cds/apod/apod/2019/july/TSE2017_Horalek_1600.jpg" alt="Corona 2017 Druckmüller"></a>
+      <figcaption><b>Затмение 2017, обработка Друкмюллера.</b> Стримеры, лучи, поле — как железные опилки. <span class="take">Модель: белый свет ∝ плотности — форма поля видна по короне.</span><span class="src">P. Horálek, Z. Hoder, M. Druckmüller, P. Aniol, S. Habbal / Solar Wind Sherpas</span></figcaption></figure>
+    <figure><a class="img" href="https://science.nasa.gov/image-article/apod-2017-september-20-the-big-corona/" target="_blank"><img loading="lazy" src="https://assets.science.nasa.gov/content/dam/science/cds/apod/apod/2017/september/Corona_Wong_5156.jpg" alt="Corona 2017 Wong"></a>
+      <figcaption><b>Затмение 2017, 40 выдержек.</b> Корона, тающая на несколько радиусов. <span class="take">Модель: внешнее гало ветра.</span><span class="src">Alson Wong</span></figcaption></figure>
+    <figure><a class="img" href="https://science.nasa.gov/image-article/apod-2024-april-2-detailed-view-of-a-solar-eclipse-corona/" target="_blank"><img loading="lazy" src="https://assets.science.nasa.gov/content/dam/science/cds/apod/apod/2024/april/CoronaExmouth_Hart_1920.jpg" alt="Corona 2023 Hart"></a>
+      <figcaption><b>Затмение 2023: протуберанцы.</b> Розовые петли и капли холодного водорода у края. <span class="take">Модель: конденсации — протуберанцы и дождь.</span><span class="src">Phil Hart</span></figcaption></figure>
+    <figure class="wide"><a class="img" href="https://science.nasa.gov/image-article/apod-2024-april-5-the-solar-corona-unwrapped/" target="_blank"><img loading="lazy" src="https://assets.science.nasa.gov/content/dam/science/cds/apod/apod/2024/april/CoronaGraph.jpg" alt="Corona unwrapped"></a>
+      <figcaption><b>Корона «развёрнутая» по углу.</b> Спокойное Солнце (2017) — стримеры у экватора; активное (2023) — лучи во все стороны. <span class="take">Модель: от активности зависит вся форма короны.</span><span class="src">Peter Ward (Barden Ridge Observatory)</span></figcaption></figure>
+    <figure><a class="img" href="https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg" target="_blank"><img loading="lazy" src="https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg" alt="SOHO LASCO C2"></a>
+      <figcaption><b>Коронограф (SOHO, 2–6 R☉, сейчас).</b> Стримеры и выбросы массы — белые облака, уходящие наружу. <span class="take">Модель: облака-сгустки и выбросы.</span><span class="src">ESA / NASA / SOHO / LASCO</span></figcaption></figure>
+    <figure><a class="img" href="https://soho.nascom.nasa.gov/data/realtime/c3/1024/latest.jpg" target="_blank"><img loading="lazy" src="https://soho.nascom.nasa.gov/data/realtime/c3/1024/latest.jpg" alt="SOHO LASCO C3"></a>
+      <figcaption><b>Коронограф (SOHO, до 30 R☉, сейчас).</b> Ветер и стримеры на фоне звёзд. <span class="take">Модель: дальний вид — звезда с гало.</span><span class="src">ESA / NASA / SOHO / LASCO</span></figcaption></figure>
+  </div>
+
+  <h2>Изнутри короны</h2>
+  <div class="grid">
+    <figure class="wide"><a class="img" href="https://svs.gsfc.nasa.gov/14055/" target="_blank"><img loading="lazy" src="https://svs.gsfc.nasa.gov/vis/a010000/a014000/a014055/wispr_lw_composite_enc08_20210428.00001_print.jpg" alt="Parker WISPR"></a>
+      <figcaption><b>Parker Solar Probe внутри короны.</b> Стримеры видны сбоку, как лучи, проходящие мимо корабля. <span class="take">Модель: вид корабля вблизи звезды — ровно наш случай.</span><span class="src">NASA / Johns Hopkins APL / Naval Research Lab</span></figcaption></figure>
+    <figure class="wide"><a class="img" href="https://svs.gsfc.nasa.gov/14055/" target="_blank"><img loading="lazy" src="https://svs.gsfc.nasa.gov/vis/a010000/a014000/a014055/WISPR_LW_Combined_Enc9_Trimmed.00001_print.jpg" alt="Parker WISPR encounter 9"></a>
+      <figcaption><b>Parker, 9-й пролёт.</b> Тонкие лучи стримеров, звёзды позади. <span class="take">Модель: прозрачность короны — сквозь неё видно небо.</span><span class="src">NASA / Johns Hopkins APL / Naval Research Lab</span></figcaption></figure>
+  </div>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Симулятор звезды М31</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Пульт обсерватории: слева — звезда во всё поле, справа (на узком экране — снизу) — панель приборов. Одна тёмная тема: вид космоса */
+  :root {
+    --space: #04070b; --panel: #0b1219; --field: #0f1820; --line: #1d2a36; --ink: #d9e2ea; --dim: #8496a6; --acc: #e3b673;
+    --ui: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif; --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--space); color: var(--ink); font: 13px/1.4 var(--ui); overflow: hidden; }
+  #view { position: fixed; inset: 0 380px 0 0; background: var(--space); }
+  #view canvas { display: block; }
+  #hud { position: fixed; left: 16px; right: 396px; top: calc(10px + env(safe-area-inset-top, 0px)); pointer-events: none; color: var(--dim); font-size: 12px; text-shadow: 0 0 4px #000; }
+  #hud b { color: var(--ink); font-weight: 600; }
+  #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px calc(40px + env(safe-area-inset-bottom, 0px)); }
+  h1 { font-size: 15px; margin: 0 0 8px; font-weight: 600; text-wrap: balance; }
+  .tabs { display: flex; gap: 6px; margin: 6px 0 10px; }
+  button { background: #121c26; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #3a4f63; }
+  button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+  button.on { border-color: var(--acc); color: var(--acc); }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  input[type=text], select, textarea { background: var(--field); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; font: inherit; min-width: 0; }
+  input[type=text] { width: 100%; }
+  textarea { width: 100%; height: 120px; font: 11px/1.35 var(--mono); }
+  .info { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; margin: 8px 0; color: var(--dim); }
+  .info b { color: var(--ink); font-weight: 600; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -2px; margin-right: 4px; border: 1px solid #0006; }
+  details { border-top: 1px solid var(--line); padding: 6px 0; }
+  .comps { display: grid; grid-template-columns: 1fr auto auto; gap: 1px 10px; font-size: 12px; margin: 4px 0; align-items: center; }
+  .comps .h { color: var(--dim); font-size: 11px; } .comps .n { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .comps label { display: flex; gap: 6px; align-items: center; } .comps label.sub { padding-left: 18px; } .cdim { color: var(--dim); font-size: 12px; }
+  summary { cursor: pointer; color: var(--acc); font-weight: 600; padding: 2px 0; }
+  .sl { display: grid; grid-template-columns: minmax(0, 1fr) 112px 52px; gap: 6px; align-items: center; margin: 3px 0; }
+  .sl label { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sl input[type=range] { width: 100%; accent-color: var(--acc); }
+  .sl output, #speedO, #scrubO { font: 11px var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .chk { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px; color: var(--dim); }
+  .stats { font: 11px/1.45 var(--mono); font-variant-numeric: tabular-nums; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ref { font-size: 12px; color: var(--dim); }
+  .ref td { padding: 2px 6px 2px 0; vertical-align: top; }
+  .ref td:first-child { color: var(--ink); white-space: nowrap; }
+  .note { font-size: 11px; color: var(--dim); margin-top: 10px; }
+  .hidden { display: none !important; }
+  /* узкий экран: звезда сверху, панель — снизу на всю ширину */
+  @media (max-width: 760px) {
+    #view { inset: 0 0 45% 0; }
+    #hud { right: 16px; }
+    #panel { top: 55%; width: 100%; border-left: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="hud"></div>
+<div id="panel">
+  <h1>Симулятор звезды</h1>
+  <div class="tabs"><button data-mode="star" class="on">Звезда</button><button data-mode="sn">Сверхновая</button></div>
+
+  <div class="row"><input type="text" id="starName" list="starList" placeholder="звезда каталога — например, Barnard's Star" aria-label="звезда каталога"><datalist id="starList"></datalist></div>
+  <div class="row"><input type="text" id="spec" placeholder="спектр — например, M4V, G2V, K2III, DA2" style="flex:1" aria-label="спектральный класс"><select id="comp" title="компонент кратной системы" aria-label="компонент кратной системы"></select></div>
+  <div class="row" id="presets"></div>
+  <div class="info" id="info"></div>
+  <details id="compBox" open><summary>Компоненты звезды — выключить, сравнить цену</summary>
+    <div class="comps" id="comps"></div>
+    <div class="row"><button id="compMeasure" title="каждая часть рисуется отдельно 10 раз с ожиданием видеокарты — время на кадр">Замерить видеокарту</button><span class="cdim" id="compFps"></span></div>
+  </details>
+
+  <div class="row">
+    <label class="chk"><input type="checkbox" id="optFlares" checked> вспышка</label>
+    <label class="chk"><input type="checkbox" id="optCme" checked> выброс</label>
+  </div>
+  <div class="row">
+    <label class="chk" title="вблизи — корона в ультрафиолете (17,4 нм), вдали — как видит глаз; переход по расстоянию"><input type="checkbox" id="optEuv" checked> ультрафиолет вблизи</label>
+    <span class="chk" title="сетка объёма короны (газ выше нижнего слоя и над краем): ячеек по долготе × широте × высоте; нижний слой на диске — отдельная текстура (ниже); время запекания">сетка</span><input type="range" id="euvN" min="48" max="256" step="16" value="128" style="width:90px" aria-label="разрешение сетки ультрафиолета"><output id="euvNO"></output>
+  </div>
+  <div class="row">
+    <span class="chk" title="нижний слой короны на диске (до 1,15 R★) — текстура на поверхности: две силовые линии на ячейку, форма перетрассируется плитками (видимое — чаще), яркость — каждый кадр по нагреву; переход между ячейками — плавный на две ячейки. Мельче — резче и дольше обновление формы">текстура</span><input type="range" id="euvS" min="7" max="11" step="1" value="10" style="width:90px" aria-label="разрешение текстуры нижнего слоя"><output id="euvSO"></output>
+  </div>
+  <div class="row">
+    <button id="play">Пауза</button>
+    <span class="chk">скорость</span><input type="range" id="speed" min="0" max="3" step="0.05" value="1" style="width:90px" aria-label="скорость"><output id="speedO">1</output>
+  </div>
+  <div class="row"><span class="chk">время цикла</span><input type="range" id="scrub" min="0" max="18" step="0.01" value="0" style="flex:1" aria-label="время цикла"><output id="scrubO">0</output></div>
+  <div class="row"><button id="reseed">Новый сид</button><span class="chk" id="seedO"></span><button id="reset">Сброс параметров</button><button id="copy">Скопировать параметры</button></div>
+  <textarea id="json" hidden aria-label="параметры в JSON"></textarea>
+
+  <div id="groups"></div>
+
+  <details open><summary>Сводка модели</summary><div class="stats" id="stats"></div></details>
+  <details><summary>Ориентиры для обсуждения (Солнце и красные карлики)</summary>
+    <table class="ref">
+      <tr><td>Радиус Солнца</td><td>696 000 км; звезда Барнарда — 0,19 R☉ (≈ 130 000 км), Росс 128 — 0,2 R☉</td></tr>
+      <tr><td>Гранулы</td><td>на Солнце ≈ 1 000–1 500 км (≈ 0,002 R☉), живут 5–10 мин; у красных карликов мельче — сила тяжести выше</td></tr>
+      <tr><td>Супергранулы</td><td>≈ 30 000 км, живут сутки</td></tr>
+      <tr><td>Пятна</td><td>на Солнце ≈ 2 500–50 000 км; у активных M-карликов пятна могут покрывать заметную долю поверхности</td></tr>
+      <tr><td>Корональные петли</td><td>на Солнце высота ≈ 10⁴–10⁵ км (0,015–0,15 R☉), длина до ≈ 10⁶ км</td></tr>
+      <tr><td>Протуберанцы</td><td>высота ≈ 10⁴–10⁵ км, после выброса — до нескольких R☉</td></tr>
+      <tr><td>Корональный выброс</td><td>скорость ≈ 300–3 000 км/с, угловая ширина ≈ 30–60°; за сутки уходит на десятки R☉</td></tr>
+      <tr><td>Вспышки M-карликов</td><td>петли вспышек по оценкам сравнимы с радиусом звезды — относительно больше солнечных</td></tr>
+      <tr><td>Сверхновая</td><td>выброс ≈ 5 000–20 000 км/с; оболочка остатка за годы — сотни а.е., за века — световые годы</td></tr>
+    </table>
+    <div class="ref">Ориентиры — порядок величин для обсуждения, не измерения конкретных звёзд.</div>
+  </details>
+  <div class="note">Тянуть — вращать, правая кнопка или Shift — сдвиг, колесо — дистанция, двойной щелчок — сброс. Каталог звёзд: HYG v4.0 и Gaia/SIMBAD (CC BY-SA 4.0). <a href="refs.html" target="_blank" style="color:var(--acc)">Ориентиры — настоящие снимки Солнца</a>.</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script src="stars.js?v=0675020d75"></script>
+<script src="star-model.js?v=0675020d75"></script>
+<script src="surface-state.js?v=0675020d75"></script>
+<script src="photosphere.js?v=0675020d75"></script>
+<script src="corona.js?v=0675020d75"></script>
+<script src="lab.js?v=0675020d75"></script>
+</body>
+</html>
