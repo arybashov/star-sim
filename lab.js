@@ -373,17 +373,21 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     // в площадке); площадка — не мельче источника полюса (расплывание уводит его глубже). Только корона стенда (её поле и нагрев); модель
     // звезды, фотосфера и игра — прежние
     const spotMin = 1e21 * Math.pow(o.R / 6.957e10, 2);   // пора / пятно: 10²¹ Мкс у Солнца, у других — × (R/R☉)² (то же поле на той же доле поверхности)
+    // доля пятна — плавно через порог (автор: «немного моргает — вспышки блоками моргают иногда — именно на солнце»): прежде на пороге 30 %
+    // потока полюса разом переезжали из глубокого источника площадки в мелкий источник пятна (3 кГс) — поле и нагрев области скачком; на
+    // Солнце пятна включались и выключались раз в 1–5 с показа. Теперь доля пятна растёт от 0,5 до 1,5 порога (smoothstep)
+    const fsOf = (Q, fs0) => { const x = Math.min(1, Math.max(0, Math.abs(Q.q) * fs0 * sFo(Q) * o.PHI0 / spotMin - 0.5)); return fs0 * sFo(Q) * x * x * (3 - 2 * x); };
     const e = effStar(), fs0 = e.labPlageF != null ? e.labPlageF : 1, dP = e.labPlageD || 0, d00 = star.params.poleDepth, gU = SM.charges([], star.params).gUnit;
     const split = dP > 0 && fs0 < 1 && !(corona && corona.maxCharges && corona.maxCharges() < 256);   // видеокарта с малым пределом — без площадок
     const PS = []; for (const Q of PV) { if (Q.q === 0) continue; if (!split) { PS.push(Q); continue; }
-      // пятно с потоком меньше 10²¹ Мкс (пора) — без своего заряда, его поток — в площадке (зарядов вдвое меньше: дешевле снимки поля)
-      const fs = Math.abs(Q.q) * fs0 * sFo(Q) * o.PHI0 >= spotMin ? fs0 * sFo(Q) : 0, d0 = Q.dep > 0 ? Q.dep : d00, ds = Math.min(d0, Math.sqrt(gU * Math.abs(Q.q) * fs / o.spotBs));
+      // пятно с потоком меньше половины порога (пора; порог — 10²¹ Мкс × (R/R☉)²) — без своего заряда, его поток — в площадке; от 0,5 до 1,5 порога доля пятна растёт плавно (зарядов вдвое меньше: дешевле снимки поля)
+      const fs = fsOf(Q, fs0), d0 = Q.dep > 0 ? Q.dep : d00, ds = Math.min(d0, Math.sqrt(gU * Math.abs(Q.q) * fs / o.spotBs));
       if (fs > 0) PS.push({ p: Q.p, q: Q.q * fs, dep: Math.max(1e-3, ds), uid: Q.uid }); PS.push({ p: Q.p, q: Q.q * (1 - fs), dep: Math.max(dP, d0), uid: -1 - Q.uid }); }
     // предел зарядов видеокарты (разбор Codex): с изображениями заряд — два места; не влезает — остаются сильнейшие полюса целиком (иначе
     // обрезались бы изображения последних и поле менялось)
     { const cap = corona && corona.maxCharges ? corona.maxCharges() : 256, per = star.params.rSS > 1 ? 2 : 1, nz = PS.filter(Q => Q.q !== 0);
       if (nz.length * per > cap) { nz.sort((a, b) => Math.abs(b.q) - Math.abs(a.q)); PS.length = 0; PS.push(...nz.slice(0, Math.floor(cap / per))); } }
-    const spots = PV.filter(Q => !Q.dead && Math.abs(Q.q) >= o.qPore && sFo(Q) > 0 && (!split || Math.abs(Q.q) * fs0 * sFo(Q) * o.PHI0 >= spotMin)).map(Q => { const n = Q.p.clone().normalize(), A = Math.abs(Q.q) * (split ? fs0 : 1) * o.PHI0 * sFo(Q) / o.spotBs;
+    const spots = PV.filter(Q => !Q.dead && Math.abs(Q.q) >= o.qPore && sFo(Q) > 0 && (!split || fsOf(Q, fs0) > 0)).map(Q => { const n = Q.p.clone().normalize(), A = Math.abs(Q.q) * (split ? fsOf(Q, fs0) : sFo(Q)) * o.PHI0 / o.spotBs;
       return [n.x, n.y, n.z, Math.acos(Math.max(-1, 1 - A / (2 * Math.PI * o.R * o.R)))]; });
     // заряды — с uid полюсов в их порядке и признаком изображений: корона по ним переносит основания трубок (разбор Codex)
     const C = SM.charges(PS, star.params); C.uids = PS.filter(Q => Q.q !== 0).map(Q => Q.uid); C.img = star.params.rSS > 1;
