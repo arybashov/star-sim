@@ -81,6 +81,8 @@
       return mix(mix(fh4At(i, j), fh4At(i + 1, j), fx), mix(fh4At(i, j + 1), fh4At(i + 1, j + 1), fx), fy); }`;
   const BAKE_HEAD = `precision highp float; precision highp int; precision highp sampler2D;
     layout(location = 0) out vec4 o0;
+    bool badF(float x) { return (floatBitsToUint(x) & 0x7f800000u) == 0x7f800000u; }   // NaN или ±Inf — по битам (не исчезает при быстрой математике)
+    float finH(float x) { return badF(x) ? -1.0 : clamp(x, 0.0, 6.0e4); }   // запись в половинную точность: конечное, ≤ 60000 (Metal округляет большее в Inf); ошибка — метка −1 (луч: ноль и флаг)
     uniform sampler2D uFH; uniform int uFHW, uFHH; uniform float uLayer, uNr, uNt, uNp, uRmin, uRmax, uRcm, uGM, uTopen, uNopen, uBmin, uSW, uSH, uStepMode;
     uniform highp sampler3D uBG; uniform float uGOn, uGR0, uTWarmV;
     ${FIELD_GLSL}
@@ -159,7 +161,7 @@
       if (uEvOn > 0.5) { float phV = 2.0 * PI * (float(ij.x) + 0.5) / uNp, thV = PI * (float(ij.y) + 0.5) / uNt;   // направление ячейки — как в uvw()
         eps = eps * evDim(vec3(sin(thV) * cos(phV), cos(thV), sin(thV) * sin(phV))) + ea; }   // затемнение фона после выброса; аркада — поверх
       // R — свечение 17,4 нм; GBA — основание силовой линии (единичный вектор — замкнутая, длина ½ — открытая, 0 — нет основания)
-      o0 = vec4(eps, foot);
+      o0 = vec4(finH(eps), foot);
     }`;
   // текстура нижнего слоя на поверхности (автор: «газ очень низкого разрешения можно сделать — а там не объём высотой 1, а прямо текстуру
   // на поверхность»; формулы — разбор Codex, вариант B): в каждой точке — силовая линия из основания (в сторону, куда поле выходит наружу):
@@ -348,20 +350,20 @@
         // яркости активных областей на снимках SDO 171); высота слоя — по излучению обеих частей
         if (uWarm > 0.0 && T > uTWarm) { float nw = uXNu * (1.2 / 2.3) * p / (KB * uTWarm) / 1e9, ew = uWarm * smoothstep(1.6e6, 2.6e6, T) * nw * nw * resp174(uTWarm), hw = max(1e-3, 0.5 * KB * uTWarm * uRcm / (MU * MP * uGM));
           HX = (eX * HX + ew * hw) / max(eX + ew, 1e-30); eX += ew; } }
-      o0 = vec4(e0, He, eX, HX); }`;   // ковёр: свечение у основания и высота слоя; протяжённая корона: то же
+      o0 = vec4(finH(e0), finH(He), finH(eX), finH(HX)); }`;   // ковёр: свечение у основания и высота слоя; протяжённая корона: то же
   // мох — переходный слой у оснований горячих петель (автор: «давай активные области»): ядра активных областей — 2–4 МК, в 17,1 нм тусклые;
   // ярок их переходный слой, где температура проходит через ≈ 1 МК при высоком давлении. Тепло проводится вниз: κ₀T^{5/2}·dT/ds = F_c ≈ F,
   // поэтому столб n_e²·ds = (n_e·T)²·κ₀·T^{1/2}/F·dT; свёртка с откликом R174 (гауссиана по lg T) — ln10·T₀^{3/2}·1,09·σ√(2π) ≈ 6,35·10⁸,
   // до 0,7·T_max (выше — корона петли, её считает своя часть); давление — RTV петли длиной uXL при местном нагреве
   const MOSS_FS = BAKE_HEAD + `
     uniform sampler2D uNet; uniform float uCW, uCH, uXL, uNetK, uMossL, uMossFc;
-    float ncdf(float z) { return 0.5 * (1.0 + tanh(0.7978845608 * (z + 0.044715 * z * z * z))); }
+    float ncdf(float z) { if (z <= -6.0) return 0.0; if (z >= 6.0) return 1.0; return 0.5 * (1.0 + tanh(clamp(0.7978845608 * (z + 0.044715 * z * z * z), -10.0, 10.0))); }   // tanh — без переполнения экспонент
     void main() { vec2 ij = gl_FragCoord.xy; float ph = 2.0 * PI * ij.x / uCW, th = PI * ij.y / uCH; vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
       vec4 h4 = fh4(n); float N = texture(uNet, vec2(ij.x / uCW, ij.y / uCH)).r * uNetK, F = max(h4.r, 0.0) * (1.0 - quietShare(h4)) * sqrt(max(N, 0.0)), I = 0.0;   // мох — у оснований разрешённых петель областей
       // петли ядра активной области — длиной uMossL (≈ 55 тыс. км у Солнца); вниз проводится доля uMossFc нагрева (у горячих петель ≈ половина)
       if (F > 0.0) { float Lh = 0.5 * uMossL * uRcm, x = pow(F / 9.8e4 * Lh, 2.0 / 7.0), Tm = 1400.0 * x, p = x * x * x / Lh, pk = (1.2 / 2.3) * p / KB;
         I = pk * pk * 1e-6 / (uMossFc * F) * 6.35e8 * ncdf((log(0.7 * Tm) / log(10.0) - 6.0) / 0.12) / (1e18 * uRcm); }
-      o0 = vec4(I, 0.0, 0.0, 0.0); }`;   // столб мха по вертикали, в единицах n₉²·R★
+      o0 = vec4(finH(I), 0.0, 0.0, 0.0); }`;   // столб мха по вертикали, в единицах n₉²·R★
   // выброс частицами (автор: «давай как в ультрафиолете — нити и брызги»; замысел — разбор Codex): сгустки холодного вещества рисуются в
   // 8 слоёв глубины в пределах облака частиц (4 цели HalfFloat: τ слоёв 0–3, 4–7, свечение 0–3, 4–7; размер — как у буфера луча). Луч
   // берёт свой пиксель: пропускание к точке t — exp(−Στ_j·F_j(t)), F_j — пройденная доля слоя j (разбор Codex: два момента глубины
@@ -369,12 +371,14 @@
   // ΔI = e^{−Σ_{i<j}τ_i}·E_j·(1 − e^{−τ_j})/τ_j (тёмная сердцевина нити гасит своё свечение — светлые края). Свечение — в долях белого (uIs)
   const PART_GLSL = `
     uniform float uPOn; uniform float uPBnd[9]; uniform sampler2D uPT0, uPT1, uPE0, uPE1;
-    float pTau[8]; float pEm[8]; float pCum[9]; bool pAny = false;
+    float pTau[8]; float pEm[8]; float pCum[9]; bool pAny = false, pNan = false;
+    bool pBad(vec4 v) { uvec4 u = floatBitsToUint(v) & uvec4(0x7f800000u); return any(equal(u, uvec4(0x7f800000u))); }
     void partLoad() { pAny = false; if (uPOn < 0.5) return; ivec2 q = ivec2(gl_FragCoord.xy); vec4 a = texelFetch(uPT0, q, 0), b = texelFetch(uPT1, q, 0), c = texelFetch(uPE0, q, 0), e = texelFetch(uPE1, q, 0);
       pTau[0] = a.x; pTau[1] = a.y; pTau[2] = a.z; pTau[3] = a.w; pTau[4] = b.x; pTau[5] = b.y; pTau[6] = b.z; pTau[7] = b.w;
       pEm[0] = c.x; pEm[1] = c.y; pEm[2] = c.z; pEm[3] = c.w; pEm[4] = e.x; pEm[5] = e.y; pEm[6] = e.z; pEm[7] = e.w;
       pCum[0] = 0.0; for (int j = 0; j < 8; j++) { pTau[j] = max(pTau[j], 0.0); pEm[j] = max(pEm[j], 0.0); pCum[j + 1] = pCum[j] + pTau[j]; }
-      pAny = pCum[8] > 1e-5 || dot(c + e, vec4(1.0)) > 0.0; }
+      pAny = pCum[8] > 1e-5 || dot(c + e, vec4(1.0)) > 0.0;
+      pNan = pBad(a) || pBad(b) || pBad(c) || pBad(e); if (pNan) { pAny = false; } }   // неконечные слои частиц — не применять (луч ставит флаг)
     float partT(float t) { if (!pAny || t <= uPBnd[0]) return 1.0; if (t >= uPBnd[8]) return exp(-pCum[8]);
       int k = 0; for (int j = 1; j < 8; j++) if (t >= uPBnd[j]) k = j; return exp(-(pCum[k] + pTau[k] * (t - uPBnd[k]) / max(uPBnd[k + 1] - uPBnd[k], 1e-6))); }
     // поверхность диска — за всеми частицами своего пикселя (частицы за диском отсечены по фрагменту): полное пропускание
@@ -439,7 +443,7 @@
       float rr = max(ra, rb) * (1.2 + min(8.0, ex));
       vec3 W = M + ud * (corner.x * (0.5 * lp + rr)) + sd * (corner.y * rr);
       vW = W; vP0 = P0; vP1 = P1; vOk = 1; gl_Position = uProj * uView * vec4(W, 1.0); }`;
-  const TUBE_FS = `precision highp float;
+  const TUBE_FS = `precision highp float; precision highp sampler2D;
     layout(location = 0) out vec4 o0; in vec3 vW, vP0, vP1, vN0, vN1; in float vRa, vRb, vT, vPb, vJa, vJb, vHb, vGate, vSc; flat in int vOk; uniform vec3 uCam; uniform float uGM, uRcm, uFill, uH0;
     ${PART_GLSL}
     const float KB = ${KB.toExponential(6)}, MP = ${MP.toExponential(6)}, MU = ${MU.toFixed(6)};
@@ -475,7 +479,8 @@
       // нижняя часть трубки погашена плавно от uH0 до 2·uH0 над поверхностью: основание короны показывает текстура (там же были толстые
       // яркие низкие петли — автор: «появляются иногда очень толстые трубки»)
       float hw = smoothstep(uH0, 2.0 * uH0, length(xm) - 1.0);
-      partLoad(); o0 = vec4(vSc * vGate * hw * mix(eR, mix(vJa, vJb, sm), vHb) / uFill * (t1 - t0) * partT(tc + 0.5 * (t0 + t1)), 0.0, 0.0, 0.0); }`;   // частицы выброса — до накопления (разбор Codex)
+      partLoad(); float tv = vSc * vGate * hw * mix(eR, mix(vJa, vJb, sm), vHb) / uFill * (t1 - t0) * partT(tc + 0.5 * (t0 + t1));
+      o0 = vec4((floatBitsToUint(tv) & 0x7f800000u) == 0x7f800000u ? 0.0 : min(tv, 6.0e4), 0.0, 0.0, 0.0); }`;   // частицы выброса — до накопления; вклад — конечный (разбор Codex)
   const GCOPY_FS = `precision highp float; precision highp sampler2D; layout(location = 0) out vec4 o0; uniform sampler2D uSG, uMask; uniform float uSW, uSH;
     // плитка выбрана? значение маски: 0 — нет, 60·(фаза + 1) — только ячейки этой фазы 2×2, 255 — все ячейки (сборка)
     // форма хранится по фазам: четверть текстуры на фазу 2×2 (ячейки одной фазы — рядом: группы потоков видеокарты считают целиком; при
@@ -492,7 +497,7 @@
     ${FIELD_GLSL}
     const float PI = 3.14159265359;
     void main() { vec2 ij = floor(gl_FragCoord.xy); float ph = 2.0 * PI * (ij.x + 0.5) / uGNp, th = PI * (ij.y + 0.5) / uGNt, r = exp(log(uRmax) * (uGL + 0.5) / uGNr);
-      float dm; vec3 b = fieldD(r * vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph)), dm); o0 = vec4(b, dm); }`;
+      float dm; vec3 b = fieldD(r * vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph)), dm); uvec4 ub = floatBitsToUint(vec4(b, dm)) & uvec4(0x7f800000u); bvec4 bad = equal(ub, uvec4(0x7f800000u)); if (bad.x || bad.y || bad.z) b = vec3(0.0); o0 = vec4(clamp(b, -6.0e4, 6.0e4), bad.w ? 0.0 : clamp(dm, -6.0e4, 6.0e4)); }`;
   // карта нагрева оснований на видеокарте (автор: «ужасно выглядят пиксели — надо текстуру на шар считать на карте»; разбор Codex, вариант A):
   // те же формулы, что derive() в surface-state.js, — но в точке поверхности, а не средним по ячейке 128×64 (≈ 5 000 км: квадраты в короне):
   // f_res = |B_r|/B_conc, U — тени (объединение дисков площадью |q|·Φ₀·фаза/B_s; край — сглажен на ячейку), ковёр B_carpet·(1 − U),
@@ -531,9 +536,15 @@
   // луч в половинном разрешении (автор: «луч в половинном разрешении») — растяжка на экран билинейно (цвет предумножен — смешивается верно)
   const UP_FS = `precision highp float; precision highp sampler2D; layout(location = 0) out vec4 o0; in vec2 vNdc; uniform sampler2D uT;
     void main() { o0 = texture(uT, vNdc * 0.5 + 0.5); }`;
-  const RAY_FS = `precision highp float; precision highp sampler3D; precision highp sampler2D;
+  const RAY_FS = `precision highp float; precision highp int; precision highp sampler3D; precision highp sampler2D;
     layout(location = 0) out vec4 o0;
     in vec2 vNdc;
+    // неконечные добавки отбрасываются (автор: «на макбуке айр» чёрные полосы у Проксимы): на одних видеокартах NaN прячется в max/clamp, на
+    // Metal — чернит пиксель; nanF — где родилось (1 — объём, 2 — слои ковра/короны/мха, 4 — нижняя текстура, 8 — трубки, 16 — ленты/фронт/
+    // частицы, 32 — итог); uNanDbg (адрес ?nan=1) — красит такие пиксели
+    uniform float uNanDbg; int nanF = 0;
+    bool badR(float x) { return (floatBitsToUint(x) & 0x7f800000u) == 0x7f800000u; }
+    float okR(float x, int f) { if (badR(x)) { nanF |= f; return 0.0; } return x; }
     uniform sampler3D uVol, uVolB; uniform sampler2D uHist, uHistD, uDW, uTA; uniform sampler2D uCarp, uMoss; uniform float uCarpOn, uMossH; uniform float uTubes, uTW0, uTW1, uTK, uTRamp, uFurDisk, uFurLo, uFurHi; uniform float uDOn; uniform float uMix, uRc, uMuA, uMuB, uSurfOn, uGas; uniform mat3 uCamRot; uniform vec3 uCam; uniform float uTanH, uAspect, uRmin, uRmax, uI0, uIw, uW, uRaw, uSteps, uFur, uFurK1, uFurK2, uFurSig, uFurNorm, uFurStep, uTime;
     const float PI = 3.14159265359;
     vec3 uvw(vec3 p) { float r = length(p); return vec3(fract(atan(p.z, p.x) / (2.0 * PI) + 1.0), acos(clamp(p.y / r, -1.0, 1.0)) / PI, log(r / uRmin) / log(uRmax / uRmin)); }
@@ -559,7 +570,8 @@
       vec4 wy = vec4((1.0 - f.y) * (1.0 - f.y) * (1.0 - f.y), 3.0 * f.y * f.y * f.y - 6.0 * f.y * f.y + 4.0, -3.0 * f.y * f.y * f.y + 3.0 * f.y * f.y + 3.0 * f.y + 1.0, f.y * f.y * f.y) / 6.0;
       vec4 S = vec4(0.0);
       for (int b = 0; b < 4; b++) { int jj = clamp(i0.y + b, 0, sz.y - 1);
-        for (int a = 0; a < 4; a++) { int ii = (i0.x + a) % sz.x; if (ii < 0) ii += sz.x; S += wx[a] * wy[b] * texelFetch(uHist, ivec2(ii, jj), 0); } }
+        for (int a = 0; a < 4; a++) { int ii = (i0.x + a) % sz.x; if (ii < 0) ii += sz.x; vec4 h = texelFetch(uHist, ivec2(ii, jj), 0);
+          if (badR(h.x) || badR(h.y) || badR(h.z) || badR(h.w)) { nanF |= 4; h = vec4(0.0); } S += wx[a] * wy[b] * h; } }
       float m = clamp(mu, 0.25, 1.0); const vec4 N = vec4(1.0, 0.75, 0.5, 0.25);
       vec4 l = vec4((m - N.y) * (m - N.z) * (m - N.w) / ((N.x - N.y) * (N.x - N.z) * (N.x - N.w)), (m - N.x) * (m - N.z) * (m - N.w) / ((N.y - N.x) * (N.y - N.z) * (N.y - N.w)),
                     (m - N.x) * (m - N.y) * (m - N.w) / ((N.z - N.x) * (N.z - N.y) * (N.z - N.w)), (m - N.x) * (m - N.y) * (m - N.z) / ((N.w - N.x) * (N.w - N.y) * (N.w - N.z)));
@@ -625,6 +637,7 @@
       float dt = (t1 - t0) / float(NS), acc = 0.0;
       for (int k = 0; k < 32; k++) { if (k >= NS) break; vec3 x = o + (t0 + (float(k) + jit) * dt) * d; float r = length(x), h = r - 1.0; if (h < 0.0) continue; vec2 uv = surfUV(x / r);
         float e, H; if (comp == 2) { e = texture(uMoss, uv).r / uMossH; H = uMossH; } else { vec4 c = texture(uCarp, uv); e = comp == 0 ? c.x : c.z; H = comp == 0 ? c.y : c.w; }
+        if (e < 0.0 || H < 0.0) { nanF |= 2; continue; }   // метка ошибки запекания
         // лучи (автор: «лучи в короне ещё меньше стали»): протяжённая корона светит вдоль силовых линий — свечение × узор сети у основания линии,
         // проходящей через точку (метка основания — из объёма поля): линии от ярких узлов сети — светлые перья, средняя яркость та же
         // метки — из обоих объёмов с той же долей перетекания, что и газ (автор: «у тебя что-то пульсирует на поверхности»: прежде — только из
@@ -633,8 +646,8 @@
           if (uMix > 0.0) { vec4 v2 = texture(uVolB, q3); float l2 = length(v2.gba); m = mix(m1, l2 > 0.2 ? texture(uNet2, surfUV(v2.gba / l2)).r * uNetK2 : 1.0, uMix); }
           e *= mix(1.0, m, uExtNet); }
         if (comp == 1) e *= evDim(x);
-        acc += e * exp(-h / max(H, 1e-5)) * chAtt(x, d) * partT(t0 + (float(k) + jit) * dt); }   // частицы выброса — в каждой выборке (разбор Codex)
-      return acc * dt; }
+        acc += okR(e * exp(-h / max(H, 1e-5)) * chAtt(x, d) * partT(t0 + (float(k) + jit) * dt), 2); }   // частицы выброса — в каждой выборке (разбор Codex)
+      return okR(acc * dt, 2); }
     // выброс: пузырь над областью (центр — на высоте вершины жгута uCme.x, радиус uCme.y, толщина фронта uCme.w, яркость появления uCme.z):
     // фронт плотнее фона в uCmeRho.x раз, полость — в uCmeRho.y (разбор Codex: волны и фронты в 17,1 нм — 1,1–1,3; полости — ≈ 0,7); к лучу —
     // прибавка к уже собранному фону ((ρ² − 1)·фон), интегралом по отрезкам пересечения (фон — из объёма)
@@ -652,17 +665,18 @@
     float furM(float fr, vec3 foot, bool ok) { if (uGas > 0.5) return fr > 0.0 && ok ? mix(1.0, furW(foot), fr) : 1.0; return fr > 0.0 && ok ? fr * furW(foot) : 0.0; }
     void main() {
       // луч — из поля зрения камеры (без обращения проекции: при дальней плоскости в 10⁵ точности float не хватало)
-      vec3 d = normalize(uCamRot * vec3(vNdc.x * uTanH * uAspect, vNdc.y * uTanH, -1.0)), o = uCam; partLoad();
+      vec3 d = normalize(uCamRot * vec3(vNdc.x * uTanH * uAspect, vNdc.y * uTanH, -1.0)), o = uCam; partLoad(); if (pNan) nanF |= 16;
       // прежняя звезда целиком (текстура, газ, мех) и поверх неё в середине диска — трубки (автор: «по краю делать как было раньше бахрому —
       // корону из газа — а в центре трубки», «ну и текстуру — короче к старой звезде просто в центр добавить трубок»; «хотя поведение трубок
       // более правильное»): доля трубок — по наклону луча к поверхности μ (у края луч идёт вдоль поверхности — там газ и бахрома); нижняя
       // часть трубок погашена (её свет — в текстуре); линейные яркости складываются, тон и палитра — один раз
       float wt = 0.0, It = 0.0; if (uTubes > 0.5) { vec2 t1; if (sphere(o, d, 1.0, t1) && t1.x > 0.0) { float bi = length(cross(o, d)); wt = uTRamp * smoothstep(uTW0, uTW1, sqrt(max(0.0, 1.0 - bi * bi))); }
-        if (wt > 0.0) It = texelFetch(uTA, ivec2(gl_FragCoord.xy), 0).r; }
+        if (wt > 0.0) It = okR(texelFetch(uTA, ivec2(gl_FragCoord.xy), 0).r, 8); }
       // луч мимо области короны: фронт уходящего выброса — всё равно (иначе за 2,5 R★ он обрезался бы)
       vec2 to; if (!sphere(o, d, uRmax, to)) { float Ic = 0.0;
         if (uEvOn > 0.5 && uCme.z > 0.0 && uCmeE > 0.0) { vec4 Tc = cmeTs(o, d); if (Tc.x < 1e8) Ic = uCme.z * uCmeE * cmeFront(o, d, Tc, 0.0, 1e9) * partT(Tc.x); }
-        Ic += partE() * uIs;   // ушедшие за область короны частицы выброса
+        Ic = okR(okR(Ic, 16) + okR(partE() * uIs, 16), 32);   // ушедшие за область короны частицы выброса
+        if (uNanDbg > 0.5 && uRaw < 0.5 && nanF != 0) { o0 = vec4(vec3(1.0, 0.3, 0.2) * uW, uW); return; }
         if (uRaw > 0.5) { o0 = vec4(Ic, 0.0, 0.0, 0.5); return; }
         if (Ic <= 0.0) { o0 = vec4(0.0, 0.0, 0.0, uW); return; }
         float xc = uTone > 0.5 ? sqrt(clamp(Ic / uIs, 0.0, 1.0)) : log(1.0 + Ic / uI0) / log(1.0 + uIw / uI0); o0 = vec4(gold(clamp(xc, 0.0, 1.0)) * uW, uW); return; }
@@ -681,12 +695,13 @@
       for (int k = 0; k < 1500; k++) { if (t >= b || (uGas < 0.5 && fw <= 0.0)) break; vec3 p = o + t * d; float r = length(p);
         float fr = fw * (1.0 - smoothstep(1.3, 1.4, r)), sk = mix(1.0, uFurStep, fr);   // выше 1,4 R★ — без меха и обычным шагом
         float ds = min(sk * clamp(0.1 * (r - 1.0) + 0.003, 0.003, 0.08), b - t); vec3 ps = o + (t + j * ds) * d;
-        vec3 q = uvw(ps); vec4 v = volS(uVol, q); float e = v.r;
+        vec3 q = uvw(ps); vec4 v = volS(uVol, q); float e = v.r; if (e < 0.0) { nanF |= 1; e = 0.0; }
         float rk = 1.0 - smoothstep(1.3, 1.4, r);
         { float lf = length(v.gba); e *= furM((fwE + fwD * furGate(e)) * rk, lf > 0.2 ? v.gba / lf : vec3(0.0), lf > 0.2); }
         // смена снимка поля: новый объём проявляется поверх прежнего (свечение смешивается, метки — каждая в своём объёме)
-        if (uMix > 0.0) { vec4 v2 = volS(uVolB, q); float e2 = v2.r, l2 = length(v2.gba); e2 *= furM((fwE + fwD * furGate(e2)) * rk, l2 > 0.2 ? v2.gba / l2 : vec3(0.0), l2 > 0.2); e = mix(e, e2, uMix); }
+        if (uMix > 0.0) { vec4 v2 = volS(uVolB, q); float e2 = max(v2.r, 0.0), l2 = length(v2.gba); e2 *= furM((fwE + fwD * furGate(e2)) * rk, l2 > 0.2 ? v2.gba / l2 : vec3(0.0), l2 > 0.2); e = mix(e, e2, uMix); }
         e *= chAtt(ps, d) * cmeF(cmT, t, ds) * partT(t + j * ds);   // частицы выброса — на глубине выборки
+        e = okR(e, 1);
         if (length(ps) > uRc) I += e * ds; else Il += e * ds; t += ds; }
       // живая текстура и трубки — без поглощения хромосферой (выключены по умолчанию; разбор Codex: при поглощении их пути несогласованы)
       if (al > 0.0) { vec3 P = normalize(o + ts.x * d); vec2 uv = vec2(fract(atan(P.z, P.x) / (2.0 * PI) + 1.0), acos(clamp(P.y, -1.0, 1.0)) / PI);
@@ -694,8 +709,8 @@
         // подробный слой 2048 (автор: «давай 2048 только там, куда смотрит камера»): где он готов — его доля из текстуры присутствия плиток
         // (линейная выборка — край области плавный)
         if (uDOn > 0.5) { float wd = texture(uDW, uv).r; if (wd > 0.002) J = mix(J, colJh(uHistD, uv, mu), wd); }
-        I = al * (J * partTall() + I) + (1.0 - al) * (I + Il); }
-      else I += Il;
+        J = okR(J, 4); I = al * (J * partTall() + I) + (1.0 - al) * (I + Il); }
+      else I += okR(Il, 1);
       // трубки видны (автор: «покрутите с кодексом и сделайте чтоб трубки видны были»; замысел Codex): в середине гладкий фон приглушён на uTK
       // (0,8) и трубки заменяют часть его света — прежде трубки давали 6 % света фона в своих пикселях (прибавка тона ≈ 0,01) и тонули;
       // у края wt = 0 — прежняя звезда без изменений
@@ -704,11 +719,13 @@
       if (uCarpOn > 0.5) { vec2 tq; float tHit = sphere(o, d, 1.0, tq) && tq.x > 0.0 ? tq.x : -1.0, jt = hash(gl_FragCoord.xy + 17.0);
         I += layerCol(o, d, tHit, uCarpRs, 0, 16, jt) + layerCol(o, d, tHit, uExtRs, 1, 24, jt) + layerCol(o, d, tHit, uMossRs, 2, 12, jt); }
       // 4. ленты: след пикселя поперёк ленты — с ракурсом (у края поверхность видна наискось — след длиннее)
-      if (uEvOn > 0.5 && uRib.z > 0.0 && disk) { vec3 qh = normalize(o + ts.x * d); I += ribbon(qh, ts.x * uPixA / max(dot(qh, -d), 0.1)) * chAtt(qh * (1.0 + uMossH), d) * partTall(); }
+      if (uEvOn > 0.5 && uRib.z > 0.0 && disk) { vec3 qh = normalize(o + ts.x * d); I += okR(ribbon(qh, ts.x * uPixA / max(dot(qh, -d), 0.1)) * chAtt(qh * (1.0 + uMossH), d) * partTall(), 16); }
       // фронт выброса светит своим веществом (автор: «давай выброс пусть летит»; закон — см. uCmeE в setEvent): к лучу — свечение × путь луча во
       // фронте-куполе, по всему лучу до диска (разбор Codex: обрезка границей области короны давала шов на 2,5 R★)
-      if (uEvOn > 0.5 && uCme.z > 0.0 && uCmeE > 0.0 && cmT.x < 1e8) I += uCme.z * uCmeE * cmeFront(o, d, cmT, 0.0, disk ? ts.x : 1e9) * partT(cmT.x);
-      I += partE() * uIs;   // свечение краёв нитей выброса (ослаблено нитями перед ним)
+      if (uEvOn > 0.5 && uCme.z > 0.0 && uCmeE > 0.0 && cmT.x < 1e8) I += okR(uCme.z * uCmeE * cmeFront(o, d, cmT, 0.0, disk ? ts.x : 1e9) * partT(cmT.x), 16);
+      I += okR(partE() * uIs, 16);   // свечение краёв нитей выброса (ослаблено нитями перед ним)
+      I = okR(I, 32);
+      if (uNanDbg > 0.5 && uRaw < 0.5 && nanF != 0) { vec3 c = (nanF & 1) != 0 ? vec3(1.0, 0.0, 1.0) : (nanF & 2) != 0 ? vec3(0.0, 1.0, 1.0) : (nanF & 4) != 0 ? vec3(1.0, 1.0, 0.0) : (nanF & 8) != 0 ? vec3(0.3, 1.0, 0.3) : vec3(1.0, 0.3, 0.2); o0 = vec4(c * uW, uW); return; }
       if (uRaw > 0.5) { o0 = vec4(I, disk ? 1.0 : 0.0, 0.0, 1.0); return; }
       // тон (автор: «очень равномерная корона — посмотри на снимки»): как у снимков AIA 171 в стандартной обработке (aia_intscale) — √ яркости,
       // белое — 7,3 медианы середины диска: подгонка палитры — при нашей золотой палитре середина диска той же светлоты, что на снимке SDO
@@ -837,7 +854,7 @@
     const ru = { uVol: { value: vols[0].texture }, uVolB: { value: vols[1].texture }, uHist: { value: null }, uHistD: { value: null }, uDW: { value: null }, uDOn: { value: 0 }, uMix: { value: 0 },
       uRc: { value: 1 + o.shell }, uMuA: { value: o.muA }, uMuB: { value: o.muB }, uSurfOn: { value: o.surf }, uCamRot: { value: new THREE.Matrix3() }, uCam: { value: new THREE.Vector3() }, uTanH: { value: 0.4 }, uAspect: { value: 1 }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uI0: { value: 1 }, uIw: { value: 100 }, uW: { value: 1 }, uRaw: { value: 0 }, uSteps: { value: 600 },
-      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uPOn: { value: 0 }, uPBnd: { value: new Float32Array(9) }, uCubic: { value: o.cubic != null ? o.cubic : 1 }, uPT0: { value: null }, uPT1: { value: null }, uPE0: { value: null }, uPE1: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
+      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uPOn: { value: 0 }, uPBnd: { value: new Float32Array(9) }, uNanDbg: { value: o.nanDbg ? 1 : 0 }, uCubic: { value: o.cubic != null ? o.cubic : 1 }, uPT0: { value: null }, uPT1: { value: null }, uPE0: { value: null }, uPE1: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
     Object.assign(ru, evU);   // событие: ленты, пузырь выброса, затемнение
     const rayMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: RAY_FS, uniforms: ru, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
