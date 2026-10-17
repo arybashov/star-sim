@@ -793,7 +793,7 @@
     const bv = Object.assign({}, bu, { uFH: { value: fhTex }, uFHW: { value: 128 }, uFHH: { value: 64 }, uLayer: { value: 0 }, uC: { value: uCv }, uNC: { value: 0 }, uDip: { value: 0 }, uDipU: { value: 0 }, uGU: { value: 1 },
       uDipM: { value: new THREE.Vector3(0, 1, 0) } });
     const bakeMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: GEOM_FS, uniforms: bv, depthTest: false, depthWrite: false });
-    const eu = Object.assign({}, bu, { uLayer: { value: 0 }, uGeo: { value: geos[0].texture } });   // яркость: живой нагрев (bu.uFH), геометрия снимка
+    const eu = Object.assign({}, bu, { uLayer: { value: 0 }, uGeo: { value: geos[0].texture }, uFH: { value: fhTex }, uFHW: { value: 128 }, uFHH: { value: 64 } });   // яркость: нагрев снимка (свой у каждого места объёма), геометрия снимка
     const emitMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: EMIT_FS, uniforms: eu, depthTest: false, depthWrite: false });
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bakeMat), qs = new THREE.Scene(), qc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1); quad.frustumCulled = false; qs.add(quad);
     // карта нагрева 1024×512 (≈ 650 км на экваторе Проксимы) — float, без фильтрации (билинейно — в запекании)
@@ -817,6 +817,22 @@
       uC: bu.uC, uNC: bu.uNC, uDip: bu.uDip, uDipU: bu.uDipU, uGU: bu.uGU, uDipM: bu.uDipM };   // поле — те же заряды, что в запекании
     const heatMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: HEAT_FS, uniforms: hu, depthTest: false, depthWrite: false });
     const hquad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), heatMat), hs = new THREE.Scene(); hquad.frustumCulled = false; hs.add(hquad);
+    // нагрев снимка объёма (автор: «мигает блок»; разбор Codex): у каждого места объёма (geos[i], vols[i]) — своя карта нагрева, снятая в тот же
+    // момент, что и его геометрия, в постоянном разрешении HW×HH (не зависит от подробной карты у камеры). Прежде яркость объёма считалась по
+    // живой карте каждый кадр, а основания петель — со снимка до 2,4 с давности: узкий пик нагрева у пятна уезжал из-под оснований — область
+    // за кадр тускнела в 2–5 раз, следующий снимок возвращал (замер: ≈ 2,6 ячейки за кадр меняли яркость > 50 % при неизменной геометрии).
+    // Запасной путь (карта 128×64 с процессора) — копия массива
+    const heatSnap = [0, 1, 2].map(() => ({ rt: makeHeat(HW, HH), cpu: null, tex: null, W: HW, H: HH, useCpu: false }));
+    let lastSpotR = [];   // радиусы теней текущих входов — для отступа под разрешение снимка
+    function snapHeat(i) { const sn = heatSnap[i];
+      if (bu.uFH.value === fhTex) { if (!sn.cpu) { sn.cpu = new Float32Array(128 * 64); sn.tex = new THREE.DataTexture(sn.cpu, 128, 64, THREE.RedFormat, THREE.FloatType);
+          Object.assign(sn.tex, { wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, flipY: false, generateMipmaps: false }); }
+        sn.cpu.set(fhTex.image.data); sn.tex.needsUpdate = true; sn.W = 128; sn.H = 64; sn.useCpu = true; return; }
+      sn.useCpu = false; sn.W = HW; sn.H = HH; const w0 = hu.uW.value, h0 = hu.uH.value, spC0 = spC.slice(), m = 1.5 * Math.PI / HH;
+      hu.uW.value = HW; hu.uH.value = HH; for (let k = 0; k < 64; k++) spC[k] = k < lastSpotR.length ? Math.cos(Math.min(Math.PI, lastSpotR[k] + m)) : 2;
+      const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel();
+      try { renderer.setRenderTarget(sn.rt); renderer.render(hs, qc); } finally { renderer.setRenderTarget(prev, face, mip); hu.uW.value = w0; hu.uH.value = h0; for (let k = 0; k < 64; k++) spC[k] = spC0[k]; } }
+    const useSnap = i => { const sn = heatSnap[i]; eu.uFH.value = sn.useCpu ? sn.tex : sn.rt.texture; eu.uFHW.value = sn.W; eu.uFHH.value = sn.H; };
     // ---- луч
     const ru = { uVol: { value: vols[0].texture }, uVolB: { value: vols[1].texture }, uHist: { value: null }, uHistD: { value: null }, uDW: { value: null }, uDOn: { value: 0 }, uMix: { value: 0 },
       uRc: { value: 1 + o.shell }, uMuA: { value: o.muA }, uMuB: { value: o.muB }, uSurfOn: { value: o.surf }, uCamRot: { value: new THREE.Matrix3() }, uCam: { value: new THREE.Vector3() }, uTanH: { value: 0.4 }, uAspect: { value: 1 }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
@@ -845,6 +861,7 @@
       heatDirty = true; inVer++; briVer++; heatVer++;   // нагрев сменился — яркость устарела; новая версия входов — форма всех плиток устарела
       if (fh && fh.spots) {   // карта нагрева на видеокарте: {spots: [x, y, z, угловой радиус тени], Bconc, carpetG, vh, tanTheta, su, etaEps}
         const L = Math.min(64, fh.spots.length); for (let i = 0; i < 64; i++) { const q = fh.spots[i]; if (i < L) sp[i].set(q[0], q[1], q[2], q[3]); else sp[i].set(0, 1, 0, 0); }
+        lastSpotR = fh.spots.slice(0, L).map(q => q[3]);
         Object.assign(hu.uNS, { value: L }); hu.uBconc.value = fh.Bconc; hu.uCarpet.value = fh.carpetG; hu.uDrv.value = fh.vh * fh.tanTheta; hu.uSu.value = fh.su; hu.uEtaEps.value = fh.etaEps;
         if (DET.on && detOK && !heat2) heat2 = makeHeat(HW * 2, HH * 2); heatCur = DET.on && heat2 ? heat2 : heatRT;
         const hw = heatCur.width, hh = heatCur.height, m = 1.5 * Math.PI / hh; hu.uW.value = hw; hu.uH.value = hh;
@@ -860,7 +877,7 @@
     function freezeVol() { for (let i = 0; i < NCMAX; i++) uCv[i].copy(uC[i]);
       bv.uNC.value = bu.uNC.value; bv.uDip.value = bu.uDip.value; bv.uDipU.value = bu.uDipU.value; bv.uGU.value = bu.uGU.value; bv.uDipM.value.copy(bu.uDipM.value); }
     // яркость по геометрии снимка i — живым нагревом (все слои)
-    function emit(i) { const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(); quad.material = emitMat; eu.uGeo.value = geos[i].texture;
+    function emit(i) { const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(); quad.material = emitMat; useSnap(i); eu.uGeo.value = geos[i].texture;
       try { for (let k = 0; k < o.Nr; k++) { eu.uLayer.value = k; renderer.setRenderTarget(vols[i], k, 0); renderer.render(qs, qc); } } finally { quad.material = bakeMat; renderer.setRenderTarget(prev, face, mip); } }
     // кадр яркости: пришла новая геометрия или (heat ≠ false) сменился нагрев — пересчитать показываемые (F и, если готов, N)
     function emitLive(heat) { if (!S.baked || !(geoDirty || (heat !== false && heatDirty))) return false; emit(iF); if (nReady) emit(iN); geoDirty = heatDirty = false; return true; }
@@ -1003,7 +1020,7 @@
     function readHeat() { const w = heatCur.width, h = heatCur.height, buf = new Float32Array(w * h * 4); renderer.readRenderTargetPixels(heatCur, 0, 0, w, h, buf); return { buf, W: w, H: h }; }
     // полное запекание — сразу в показываемый объём (при сборке)
     function bake(C, fh) {
-      const t0 = performance.now(); job = null; nReady = false; ru.uMix.value = 0; ru.uVol.value = vols[iF].texture; setInputs(C, fh); freezeVol(); const geo = geos[iF];
+      const t0 = performance.now(); job = null; nReady = false; ru.uMix.value = 0; ru.uVol.value = vols[iF].texture; setInputs(C, fh); freezeVol(); snapHeat(iF); const geo = geos[iF];
       const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel();
       for (let k = 0; k < o.Nr; k++) { bv.uLayer.value = k; renderer.setRenderTarget(geo, k, 0); renderer.render(qs, qc); }
       renderer.setRenderTarget(prev, face, mip); emit(iF); geoDirty = heatDirty = false;
@@ -1019,7 +1036,8 @@
     // перестройка объёма по ходу жизни поля: beginBake — снимок живых входов (в N, если его нет, иначе в C), stepBake — n порций слоёв за кадр
     // и доля перетекания F → N, stepFade — дотекание, пока новых снимков нет (бесшовно; границы яркости прежние — без автоэкспозиции)
     const sm = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
-    function beginBake() { if (job || !S.baked) return false; freezeVol(); job = { k: 0, into: nReady ? iC : iN, t0: performance.now(), m0: ru.uMix.value }; return true; }
+    const dbgGeo = { on: false, layers: [1, 3, 6], snaps: [] };   // отладка мигания (автор: «мигает блок»): геометрия нижних слоёв последних снимков
+    function beginBake() { if (job || !S.baked) return false; freezeVol(); job = { k: 0, into: nReady ? iC : iN, t0: performance.now(), m0: ru.uMix.value }; snapHeat(job.into); return true; }   // нагрев — в тот же миг, что и поле
     const LPF = Math.max(1, Math.round(4096 / (o.Np * o.Nt)));   // слоёв объёма за кадр — ≈ 4 тыс. ячеек (≈ 2,5–3 мс; живая текстура — ещё ≈ 4 мс)
     function stepBake(n) { if (!job) return false; const to = geos[job.into], prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel();
       for (let i = 0; i < (n || 1) * LPF && job.k < o.Nr; i++, job.k++) { bv.uLayer.value = job.k; renderer.setRenderTarget(to, job.k, 0); renderer.render(qs, qc); }
@@ -1028,6 +1046,8 @@
       const prog = job.k / o.Nr;
       if (nReady && job.into === iC) ru.uMix.value = job.m0 + (1 - job.m0) * prog;   // равномерно (прежде — S-кривая: скорость формы пульсировала с каждым снимком)
       if (job.k >= o.Nr) { S.rebakeMs = performance.now() - job.t0; S.rebakes = (S.rebakes || 0) + 1;
+        if (dbgGeo.on) { const gl = renderer.getContext(), L = {}, pr = renderer.getRenderTarget(); for (const k of dbgGeo.layers) { const b = new Float32Array(o.Np * o.Nt * 4); renderer.setRenderTarget(geos[job.into], k, 0); gl.readPixels(0, 0, o.Np, o.Nt, gl.RGBA, gl.FLOAT, b); L[k] = b; }
+          renderer.setRenderTarget(pr, face, mip); dbgGeo.snaps.push({ n: S.rebakes, at: performance.now(), L }); if (dbgGeo.snaps.length > 8) dbgGeo.snaps.shift(); }   // отладка мигания: геометрия готового снимка
         if (job.into === iN) nReady = true;   // первый следующий готов — перетекание начнётся со следующим снимком (или дотеканием)
         else { const f = iF; iF = iN; iN = iC; iC = f; ru.uMix.value = 0; }   // в этот миг видно N целиком — после сдвига это F: шва нет
         ru.uVol.value = vols[iF].texture; ru.uVolB.value = vols[iN].texture; job = null; geoDirty = true; }   // новая геометрия — яркость по ней
@@ -1043,7 +1063,7 @@
       const k = arguments.length ? arguments[0] | 0 : 0; bv.uLayer.value = k;
       try { renderer.setRenderTarget(geos[iC], k, 0); renderer.render(qs, qc); } finally { renderer.setRenderTarget(prev, face, mip); } }
     // замер яркости объёма (одна геометрия — все слои; в строящееся место C)
-    function measureEmit() { const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(); quad.material = emitMat; eu.uGeo.value = geos[iF].texture;
+    function measureEmit() { const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(); quad.material = emitMat; useSnap(iF); eu.uGeo.value = geos[iF].texture;
       try { for (let k = 0; k < o.Nr; k++) { eu.uLayer.value = k; renderer.setRenderTarget(vols[iC], k, 0); renderer.render(qs, qc); } } finally { quad.material = bakeMat; renderer.setRenderTarget(prev, face, mip); } }
     // система звезды: если звезда повёрнута (вращение), камера переводится в её систему — объём запечён в системе звезды
     function setFrame(m4) { if (m4) frameInv.copy(m4).invert(); else frameInv.identity(); }
@@ -1457,7 +1477,9 @@
     // разбор Codex (цена): проходы ковра и мха — только при новой карте нагрева или настройках ковра (на паузе и в неподвижном кадре — прежние)
     let carpKey = '', carpShown = null;
     // потеря контекста видеокарты (разбор Codex): после восстановления — узор и слой ковра заново
-    const onRestore = () => { netMade = false; carpKey = ''; }; renderer.domElement.addEventListener('webglcontextrestored', onRestore);
+    // потеря контекста видеокарты: пропали и геометрия снимков, и их карты нагрева — стенд пересобирает корону целиком (разбор Codex: переснять
+    // только карты недостаточно, а на паузе новых входов может не быть)
+    let ctxLost = false; const onRestore = () => { netMade = false; carpKey = ''; ctxLost = true; }; renderer.domElement.addEventListener('webglcontextrestored', onRestore);
     function carpFrame() { if (!carp.on) return; if (!netMade) { makeNet(); netMade = true; carpKey = ''; }
       const key = heatVer + '|' + JSON.stringify(carp) + '|' + netK; if (key === carpKey) return; carpKey = key; cu.uCL.value = carp.L; cu.uNetK.value = netK; cu.uXL.value = carp.xL; cu.uXNu.value = carp.xNu; cu.uMossL.value = carp.mossL; cu.uMossFc.value = carp.mossFc; cu.uWarm.value = carp.warm; pass(carpMat, carpRT);
       blu.uSig.value = carp.blur != null ? carp.blur : carp.L / 6;
@@ -1481,9 +1503,10 @@
     setChrom();
     function setCarpet(v) { if (v && typeof v === 'object') { const remake = ['net', 'lane', 'floor', 'clump', 'seed'].some(k => v[k] != null && v[k] !== carp[k]); Object.assign(carp, v); if (remake) netMade = false; } else carp.on = !!v; ru.uCarpOn.value = carp.on ? 1 : 0; }
     // слой k объёма (для проверок): Float32Array Nφ·Nθ·4 — свечение, метка основания
-    function readLayer(k) { const buf = new Float32Array(o.Np * o.Nt * 4), prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel();
-      renderer.setRenderTarget(vols[iF], k, 0); renderer.getContext().readPixels(0, 0, o.Np, o.Nt, 0x1908, 0x1406, buf); renderer.setRenderTarget(prev, face, mip); return buf; }
-    function dispose() { renderer.domElement.removeEventListener('webglcontextrestored', onRestore); carpTmp.dispose(); carpOut.dispose(); blurMat.dispose(); carpRT.dispose(); carpMat.dispose(); netRT.dispose(); netLo.dispose(); netMat.dispose(); if (sitesTex) sitesTex.dispose(); mossRT.dispose(); mossMat.dispose(); blackTex.dispose(); hyd.w.forEach(W => W.w && W.w.terminate()); hyd.w = []; hProfTex.dispose(); hTabTex.dispose(); [tLen, tGas, tLum, tPA, tPB].forEach(r => r.dispose()); tLumMat.dispose(); if (tubes.acc) tubes.acc.dispose(); if (part.mrt) part.mrt.dispose(); if (part.geo) part.geo.dispose(); pMat.dispose(); tSeed.dispose(); [tLenMat, tPtMat, tGasMat, tRenMat].forEach(m => m.dispose()); tGeo.dispose(); base.dispose(); if (detail) detail.dispose(); JL.dispose(); geos.forEach(v => v.dispose()); emitMat.dispose(); if (halfRT) halfRT.dispose(); upMat.dispose(); uq.geometry.dispose(); gridRT.dispose(); gridMat.dispose(); heatRT.dispose(); if (heat2) heat2.dispose(); heatMat.dispose(); hquad.geometry.dispose(); vols.forEach(v => v.dispose()); fhTex.dispose(); bakeMat.dispose(); rayMat.dispose(); quad.geometry.dispose(); rq.geometry.dispose(); }
+    // n — следующий объём (N): для замера показываемой смеси
+    function readLayer(k, n) { const buf = new Float32Array(o.Np * o.Nt * 4), prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel();
+      renderer.setRenderTarget(vols[n ? iN : iF], k, 0); renderer.getContext().readPixels(0, 0, o.Np, o.Nt, 0x1908, 0x1406, buf); renderer.setRenderTarget(prev, face, mip); return buf; }
+    function dispose() { renderer.domElement.removeEventListener('webglcontextrestored', onRestore); carpTmp.dispose(); carpOut.dispose(); blurMat.dispose(); carpRT.dispose(); carpMat.dispose(); netRT.dispose(); netLo.dispose(); netMat.dispose(); if (sitesTex) sitesTex.dispose(); mossRT.dispose(); mossMat.dispose(); blackTex.dispose(); hyd.w.forEach(W => W.w && W.w.terminate()); hyd.w = []; hProfTex.dispose(); hTabTex.dispose(); [tLen, tGas, tLum, tPA, tPB].forEach(r => r.dispose()); tLumMat.dispose(); heatSnap.forEach(sn => { sn.rt.dispose(); if (sn.tex) sn.tex.dispose(); }); if (tubes.acc) tubes.acc.dispose(); if (part.mrt) part.mrt.dispose(); if (part.geo) part.geo.dispose(); pMat.dispose(); tSeed.dispose(); [tLenMat, tPtMat, tGasMat, tRenMat].forEach(m => m.dispose()); tGeo.dispose(); base.dispose(); if (detail) detail.dispose(); JL.dispose(); geos.forEach(v => v.dispose()); emitMat.dispose(); if (halfRT) halfRT.dispose(); upMat.dispose(); uq.geometry.dispose(); gridRT.dispose(); gridMat.dispose(); heatRT.dispose(); if (heat2) heat2.dispose(); heatMat.dispose(); hquad.geometry.dispose(); vols.forEach(v => v.dispose()); fhTex.dispose(); bakeMat.dispose(); rayMat.dispose(); quad.geometry.dispose(); rq.geometry.dispose(); }
     // веера и ядра областей: доли тёплой составляющей (стенд, ползунки); яркость объёма — пересчитать на следующем кадре и на паузе
     // событие — вспышка и выброс (стенд; автор: «вспышка (выброс)»; замысел — разбор Codex). Часы события — физические секунды: α = (R★/v_уб)/tDyn
     // секунд на секунду показа (тот же масштаб, что у пути жгута в модели звезды; у Солнца ≈ 188); поле на время события — снимок (стенд
@@ -1536,6 +1559,7 @@
     }
     function setFans(v) { if (v && v.fanF != null) bu.uFanF.value = Math.max(0, +v.fanF); if (v && v.coreF != null) bu.uCoreF.value = Math.max(0, +v.coreF); heatDirty = true; briVer++; }   // разбор Codex: и яркость плиток текстуры (на паузе)
     return { maxCharges: () => NCMAX, setEvent, setCmeParts, cmeParts: () => ({ on: part.on, dome: part.dome, prm: Object.assign({}, part.prm), n: part.n, made: part.made || 0, stats: part.sim ? part.sim.stats() : null }),
+      lost: () => ctxLost, geoTrace: (on, layers) => { dbgGeo.on = !!on; if (layers) dbgGeo.layers = layers; dbgGeo.snaps = []; }, geoSnaps: () => ({ snaps: dbgGeo.snaps, Np: o.Np, Nt: o.Nt, Nr: o.Nr }),   // отладка мигания
       // отладка: слои частиц выброса (сумма, максимум, ненулевые)
       partRead: j => { const gl = renderer.getContext(), rt = part.mrt; if (!rt) return null; const prev = renderer.getRenderTarget(), b = new Float32Array(rt.width * rt.height * 4); renderer.setRenderTarget(rt); gl.readBuffer(gl.COLOR_ATTACHMENT0 + (j | 0)); gl.readPixels(0, 0, rt.width, rt.height, gl.RGBA, gl.FLOAT, b); gl.readBuffer(gl.COLOR_ATTACHMENT0); renderer.setRenderTarget(prev);
         let sum = 0, mx = 0, nz = 0; for (let i = 0; i < b.length; i++) { sum += b[i]; if (b[i] > mx) mx = b[i]; if (b[i] > 0) nz++; } return { W: rt.width, H: rt.height, sum, mx, nz, pb: Array.from(ru.uPBnd.value) }; },

@@ -560,6 +560,7 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     const gas = hs && hs.on ? ` · <b>поле: снимок · газ: ${hs.rate}× / фактически ${Math.round(hs.eff)}× · возраст ${hms(hs.age)} · отставание ${hs.lagReal.toFixed(1).replace('.', ',')} с · петель ${hs.n}/${hs.K}</b>${hs.err ? ` · ошибок ${hs.err}` : ''}` : '';
     $('hud').innerHTML = `<b>${st.name || st.sp}</b> · ${st.mode === 'sn' ? 'сверхновая' : 'звезда'} · t = ${t.toFixed(1)} с · ${ph}${day}${gas} · камера ${orbit.dist.toFixed(1)} R★${star.particles ? ` · частицы ${star.perf().toFixed(1)} мс/кадр` : ''} · тянуть — вращать, правая кнопка или Shift — сдвиг, колесо — дистанция, двойной щелчок — сброс`;
     profPoll(); if (star.drawSpots) timed('spotmap', () => star.drawSpots()); drawScene();
+    if (corona && corona.lost && corona.lost()) buildCorona();   // восстановлен контекст видеокарты — корона заново из текущих входов (разбор Codex)
     if (corona) {
       // перестройка по ходу жизни поля (автор: «в газодинамической пятна не соответствуют?», «перескакивает одно в другое и стоит»):
       // пока идёт время — снимки полюсов и нагрева подряд, каждый считается по слою за кадр, корона непрерывно перетекает к последнему
