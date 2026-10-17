@@ -208,11 +208,13 @@
   // сетка объёма — 160 по долготе (автор: «линии не очень хорошо читаются в центре диска — но это на солнце»): у Солнца области в 2–3 ячейки
   // сетки 96 — петли не разрешались (белое пятно со штриховкой); при 160 (ячейка 2,2°) видны арки; кадр на стенде тот же (33 мс)
   if ((st.hou | 0) < 74) { st.euvN = 160; st.hou = 74; }
+  // уровни качества (автор: «на макбуке айр … надо будет сделать упрощение, на телефоне вообще 1 кадр в 3 сек.») — по умолчанию авто
+  if ((st.hou | 0) < 75) { if (!st.quality) st.quality = 'auto'; st.hou = 75; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
       const cL = corona.carpet ? corona.carpet().L : 0.03;
       if (corona.setCarpet) corona.setCarpet({ xNu: e.labXNu != null ? e.labXNu : 1.5, blur: (e.labCarpBlur != null ? e.labCarpBlur : 0.17) * cL }); if (corona.setFans) corona.setFans({ fanF: e.labFanF != null ? e.labFanF : 0 });
-      if (corona.setCmeParts) corona.setCmeParts({ on: st.cmeParts !== false, dome: st.cmeDome === true, tau0: e.labCmeTau != null ? e.labCmeTau : 2, e0: e.labCmeE != null ? e.labCmeE : 0.1, fFall: e.labCmeFall != null ? e.labCmeFall : 0.5, N: e.labCmeN || 8000, hotF: e.labCmeHot != null ? e.labCmeHot : 0.5, hotE: e.labCmeHotE != null ? e.labCmeHotE : 4 }); } }
+      if (corona.setCmeParts) corona.setCmeParts({ on: st.cmeParts !== false, dome: st.cmeDome === true, tau0: e.labCmeTau != null ? e.labCmeTau : 2, e0: e.labCmeE != null ? e.labCmeE : 0.1, fFall: e.labCmeFall != null ? e.labCmeFall : 0.5, N: Math.min(e.labCmeN || 8000, QSET[qTier()].cmeN), hotF: e.labCmeHot != null ? e.labCmeHot : 0.5, hotE: e.labCmeHotE != null ? e.labCmeHotE : 4 }); } }
 
   // ---- сцена
   const view = $('view'), renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
@@ -307,8 +309,62 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   function resize() { const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); glow.size(w, h); }
   new ResizeObserver(resize).observe(view); resize();
 
+  // ---- уровни качества (автор: «на макбуке айр … надо будет сделать упрощение, на телефоне вообще 1 кадр в 3 сек.»; замысел и поправки —
+  // разбор Codex 17.10.2026). Сборка короны (сетка объёма, ковёр, карта нагрева, предел частиц выброса) — по уровню при сборке; показ
+  // (плотность пикселей, разрешение луча, шаг марша, точки слоёв, темп перестройки объёма) — на ходу, без пересборки. «Авто»: сборка — по
+  // устройству (телефон и планшет — низкое; NVIDIA, AMD RX/Pro, Apple Pro/Max — высокое; прочие и неизвестные — среднее), показ — по
+  // интервалам между кадрами за 3 с. Карты пятен фотосферы (модель звезды — общая с игрой) уровни не меняют
+  const QSET = {
+    high: { name: 'высокое', Np: 160, carpW: 2048, heatW: 0, cmeN: 30000 },
+    mid: { name: 'среднее', Np: 128, carpW: 1024, heatW: 0, cmeN: 8000 },
+    low: { name: 'низкое', Np: 96, carpW: 1024, heatW: 512, cmeN: 3000 } }, QI = { high: 0, mid: 1, low: 2 };
+  // показ: dpr — предел плотности пикселей (не выше экрана), ray — доля разрешения луча, step — множитель шага марша, layers — точки слоёв
+  // ковра / протяжённой короны / мха, bake — слой перестройки объёма раз в столько кадров; 3 — аварийный (только авто)
+  const QLV = [
+    { name: 'высокое', dpr: 2, ray: 0.5, step: 1, layers: [16, 24, 12], bake: 1 },
+    { name: 'среднее', dpr: 1.5, ray: 0.4, step: 1.3, layers: [12, 18, 9], bake: 1 },
+    { name: 'низкое', dpr: 1, ray: 0.33, step: 1.7, layers: [8, 12, 6], bake: 2 },
+    { name: 'аварийное', dpr: 1, ray: 0.25, step: 2.2, layers: [6, 9, 4], bake: 3 }];
+  const qGpu = (() => { try { const gl = renderer.getContext(), x = gl.getExtension('WEBGL_debug_renderer_info'), g = String(gl.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+    // ANGLE (производитель, видеокарта, интерфейс) — вторая часть без кода устройства и интерфейса
+    const a = g.match(/^ANGLE \(([^,]*),\s*(.*)\)$/), r = a ? a[2].split(/,\s*(?=Direct3D|D3D|OpenGL|Unspecified Version|Vulkan)/)[0] : g;
+    return r.replace(/ANGLE Metal Renderer:\s*/i, '').replace(/\(0x[0-9a-f]+\)/ig, '').replace(/\s+(Direct3D|D3D|OpenGL|Vulkan).*$/i, '').trim(); } catch (e) { return ''; } })();
+  const qGuess = (() => { const ua = navigator.userAgent || '';
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'low';   // iPad — с настольным UA
+    return /NVIDIA|GeForce|Quadro|Radeon (RX|Pro)|Apple M\d+ (Pro|Max|Ultra)/i.test(qGpu) ? 'high' : 'mid'; })();
+  const qAuto = () => !QSET[st.quality];
+  const qTier = () => qAuto() ? qGuess : st.quality;
+  let qLv = QI[qTier()];
+  const qParams = () => { const L = QLV[qLv]; return { rayScale: L.ray, stepK: L.step, layers: L.layers }; };
+  function applyLevel(i) { qLv = Math.max(0, Math.min(QLV.length - 1, i)); const L = QLV[qLv], pr = Math.min(L.dpr, window.devicePixelRatio || 1);
+    if (Math.abs(renderer.getPixelRatio() - pr) > 1e-3) { renderer.setPixelRatio(pr); resize(); }
+    if (corona && corona.setQuality) corona.setQuality(qParams()); }
+  // авто (разбор Codex): интервалы rAF без обрезки (телефон с кадром в 3 с тоже виден), окно 3 с; не копятся — скрытая вкладка, нулевой холст
+  // (оценка — заново), кадр калибровки; сборка короны и замер видеокарты — с прогревом 1,5 с. Спад — медиана > 40 мс или четверть кадров
+  // дольше 50 мс (p75; не чаще раза в 5 с); быстрый — три кадра подряд дольше 0,3 с (на уровень) или два дольше 1 с (сразу в аварийный). Подъём — 15 с медианы < 22 мс (9/10 кадров < 30 мс), только когда
+  // идёт время и корона видна; спад в течение 20 с после подъёма — этот уровень запрещён на 2 мин
+  const qa = { iv: [], prev: 0, hold: 0, t0: 0, good: 0, lastDown: -1e9, lastUp: -1e9, ban: {}, med: 0 };
+  const qReset = () => { qa.iv = []; qa.prev = 0; qa.t0 = 0; qa.good = 0; };   // оценка — заново (новое окно, подъём — с нуля)
+  function qHold(ms) { qa.hold = Math.max(qa.hold, performance.now() + ms); qReset(); }
+  const qSkip = () => { qa.prev = 0; };   // интервал с этим кадром (калибровка — чтение с видеокарты) — не в замер
+  function qStep(d, now) { if (d > 0 && now - qa.lastUp < 20000) qa.ban[qLv] = now + 120000; if (d > 0) qa.lastDown = now; else qa.lastUp = now; applyLevel(qLv + d); qHold(1500); }
+  function qTick(now) {
+    if (!qAuto()) return;
+    if (document.hidden || view.clientWidth === 0 || view.clientHeight === 0) { qReset(); return; }   // разбор Codex: время без холста не шло бы в подъём
+    if (now < qa.hold) { qa.prev = 0; return; }
+    if (qa.prev) qa.iv.push([now, now - qa.prev]); qa.prev = now; if (!qa.t0) qa.t0 = now;
+    const n = qa.iv.length, last3 = n >= 3 && qa.iv.slice(-3).every(x => x[1] > 300), last2 = n >= 2 && qa.iv.slice(-2).every(x => x[1] > 1000);
+    if ((last3 || last2) && qLv < QLV.length - 1) { qStep(last2 ? QLV.length - 1 - qLv : 1, now); return; }
+    while (qa.iv.length && now - qa.iv[0][0] > 3000) qa.iv.shift();
+    if (now - qa.t0 < 3000 || qa.iv.length < 3) return;
+    const v = qa.iv.map(x => x[1]).sort((a, b) => a - b), q = f => v[Math.min(v.length - 1, Math.floor(v.length * f))]; qa.med = q(0.5);
+    if ((qa.med > 40 || q(0.75) > 50) && qLv < QLV.length - 1 && now - qa.lastDown > 5000) { qStep(1, now); return; }
+    const vis = corona && corona.stats().baked && corona.weight(cam) > 0.5;
+    if (qa.med < 22 && q(0.9) < 30 && playing && vis && qLv > 0 && !(qa.ban[qLv - 1] > now)) { if (!qa.good) qa.good = now; if (now - qa.good > 15000) qStep(-1, now); } else qa.good = 0; }
+  document.addEventListener('visibilitychange', () => qHold(1500));
+
   // ---- модель
-  let star = null, sn = null, t = 0, simT = 0, lastStats = 0, playing = true, last = performance.now(), corona = null, coronaCal = false, coronaCalT = 0;   // simT — часы симуляции (пауза их останавливает)
+  let star = null, sn = null, t = 0, simT = 0, lastStats = 0, playing = true, last = performance.now(), corona = null, coronaCal = false, coronaCalT = 0, coronaCalK = 0, coronaCalF = 0;   // simT — часы симуляции (пауза их останавливает)
   const cls = () => SM.classParams(st.sp, st.comp);
   const rSunEff = () => st.R || cls().rSun, mSunEff = () => st.M || cls().mSun;   // радиус и масса: примера или по классу
   // корона солнечного типа (автор: «арктур бетельгейзе и ригель не видно, белый карлик странный»): только у звёзд с конвективной оболочкой
@@ -355,7 +411,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   // установившемуся нагреву карты поверхности (выпуск = двигатель: F_H = η_H·P_drive/площадь); границы яркости — в первом кадре.
   // Сетка — st.euvN ячеек по долготе, по широте вдвое меньше, по высоте (ln r) втрое (автор: «уменьшаем разрешение сетки — выведи в настройку»)
   // текстура нижнего слоя на поверхности — 2^st.euvS по долготе, вдвое меньше по широте (автор: «надо понижать разрешение текстуры — нет плавности»)
-  const euvGrid = () => { const Np = st.euvN | 0 || 160, sw = 1 << Math.min(11, Math.max(7, st.euvS | 0 || 10)); return { Np, Nt: Np >> 1, Nr: Math.max(8, Math.round(Np / 3)), surfW: sw, surfH: sw >> 1 }; };
+  const euvGrid = () => { const Np0 = st.euvN | 0 || 160, Np = qAuto() && !st.euvNown ? Math.min(Np0, QSET[qTier()].Np) : Np0, sw = 1 << Math.min(11, Math.max(7, st.euvS | 0 || 10)); return { Np, Nt: Np >> 1, Nr: Math.max(8, Math.round(Np / 3)), surfW: sw, surfH: sw >> 1 }; };
   function euvLabel() { const g = euvGrid(), R = star ? star.phys.rKm : 0, rMax = star && star.params.rSS > 1 ? star.params.rSS : 2.5;
     const kmH = R * 2 * Math.PI / g.Np, kmR = R * (Math.pow(rMax, 1 / g.Nr) - 1), S = corona && corona.stats();
     $('euvNO').textContent = `${g.Np}×${g.Nt}×${g.Nr} · ячейка ${(kmH / 1000).toFixed(1)}×${(kmR / 1000).toFixed(1)} тыс. км` + (S && S.baked ? ` · ${S.ms.toFixed(0)} мс` : '');
@@ -366,12 +422,12 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     // граница объёма — поверхность источника поля (заряды-изображения построены на ней); без изображений — 2,5 R★
     if (st.euv !== false && window.M31Corona && SSo && st.mode !== 'sn' && !noCorona()) {
       if (!M31Corona.supported(renderer)) console.warn('корона: нужен WebGL2 с EXT_color_buffer_float — ультрафиолет выключен');
-      else corona = M31Corona.create(THREE, renderer, Object.assign({ R: star.phys.rKm * 1e5, M: star.phys.mSun * 1.989e33, ...openCorona(), rMax: star.params.rSS > 1 ? star.params.rSS : 2.5, gas: st.euvGas === false ? 0 : 1, nanDbg: /[?&]nan=1/.test(location.search) }, euvGrid())); }   // ?nan=1 — красит неконечные добавки луча (отладка)
-    if (corona) { if (corona.setCarpet) corona.setCarpet(st.euvCarpet === true); applyChrom(); if (corona.setTone) corona.setTone(st.euvTone !== 'log'); corona.uniforms.uSurfOn.value = st.euvSurf === true ? 1 : 0; corona.uniforms.uFurDisk.value = st.euvFurDisk === true ? 1 : 0; corona.uniforms.uCubic.value = st.euvCubic === false ? 0 : 1; if (corona.setHydro) corona.setHydro(false); if (corona.setTubes) corona.setTubes(st.euvTubes === true); if (corona.setPoles) corona.setPoles(star.polesView ? star.polesView() : star.poles); const [C, fh] = coronaInputs(); corona.bake(C, fh); if (corona.setHydro) corona.setHydro(hydroOn); applyDbg(); coronaCal = true; coronaCalT = 0; coronaClk = coronaLiveClk = star.surfClockView ? star.surfClockView() : star.surfClock ? star.surfClock() : 0; }   // часы показа (разбор Codex)
+      else corona = M31Corona.create(THREE, renderer, Object.assign({ R: star.phys.rKm * 1e5, M: star.phys.mSun * 1.989e33, ...openCorona(), rMax: star.params.rSS > 1 ? star.params.rSS : 2.5, gas: st.euvGas === false ? 0 : 1, nanDbg: /[?&]nan=1/.test(location.search), carpW: QSET[qTier()].carpW, heatW: QSET[qTier()].heatW || undefined }, euvGrid())); }   // ?nan=1 — красит неконечные добавки луча (отладка)
+    if (corona) { if (corona.setCarpet) corona.setCarpet(st.euvCarpet === true); applyChrom(); if (corona.setTone) corona.setTone(st.euvTone !== 'log'); corona.uniforms.uSurfOn.value = st.euvSurf === true ? 1 : 0; corona.uniforms.uFurDisk.value = st.euvFurDisk === true ? 1 : 0; corona.uniforms.uCubic.value = st.euvCubic === false ? 0 : 1; if (corona.setHydro) corona.setHydro(false); if (corona.setTubes) corona.setTubes(st.euvTubes === true); if (corona.setPoles) corona.setPoles(star.polesView ? star.polesView() : star.poles); const [C, fh] = coronaInputs(); corona.bake(C, fh, st.euvSurf !== true && !(corona.tubesOn && corona.tubesOn())); if (corona.setQuality) corona.setQuality(qParams()); if (corona.setHydro) corona.setHydro(hydroOn); applyDbg(); coronaCal = true; coronaCalT = 0; coronaCalK = 0; coronaCalF = 0; coronaClk = coronaLiveClk = star.surfClockView ? star.surfClockView() : star.surfClock ? star.surfClock() : 0; }   // часы показа (разбор Codex)
     applyDbg();   // без короны (ультрафиолет выключен) поверхность не держится (разбор Codex)
-    euvLabel();
+    euvLabel(); qHold(1500);   // сборка — синхронная: её кадр и прогрев после — не в замер авто
   }
-  let euvT = null, coronaClk = 0, coronaLiveClk = 0;
+  let euvT = null, coronaClk = 0, coronaLiveClk = 0, bakeTick = 0;
   // снимок для короны: заряды полюсов и описание нагрева — карта нагрева считается на видеокарте в точке (1024×512) по тем же формулам, что
   // карта поверхности (тени — диски площадью |q|·Φ₀·фаза/B_s, двигатель, калибровка ε — её); прежде — массив карты 128×64 (квадраты)
   function coronaInputs() { const SSo = star.surfaceState(), o = SSo.opts, eps = SSo.stats().eps || 0;
@@ -448,7 +504,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   for (const [id, key] of [['optFlares', 'flares'], ['optCme', 'cme']]) { $(id).checked = st[key]; $(id).addEventListener('change', e => { st[key] = e.target.checked; build(); }); }
   // глоу: переключатель и ползунки (сила, порог яркости, радиус)
   $('optEuv').checked = st.euv !== false; $('optEuv').addEventListener('change', e => { st.euv = e.target.checked; buildCorona(); save(); });
-  $('euvN').value = euvGrid().Np; $('euvN').addEventListener('input', e => { st.euvN = +e.target.value; euvLabel(); save(); clearTimeout(euvT); euvT = setTimeout(() => { buildCorona(); }, 250); });
+  $('euvN').value = euvGrid().Np; $('euvN').addEventListener('input', e => { st.euvN = +e.target.value; st.euvNown = true; euvLabel(); save(); clearTimeout(euvT); euvT = setTimeout(() => { buildCorona(); }, 250); });
   $('euvS').value = Math.log2(euvGrid().surfW); $('euvS').addEventListener('input', e => { st.euvS = +e.target.value; euvLabel(); save(); clearTimeout(euvT); euvT = setTimeout(() => { buildCorona(); }, 250); });
   document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
     st.mode = b.dataset.mode; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
@@ -536,10 +592,13 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
   }
 
   // ---- кадр
+  // ?raf=timer — кадры по таймеру (отладка: скрытая вкладка или панель без rAF)
+  const nextFrame = /[?&]raf=timer/.test(location.search) ? f => setTimeout(() => f(performance.now()), 16) : f => requestAnimationFrame(f);
   function frame(now) {
-    requestAnimationFrame(frame);
+    nextFrame(frame);
     // время кадра: вид (цикл, детализация) — не больше 0,1 с; физика (часы модели) — всё прошедшее время, иначе на редких кадрах
     // терялись бы физические часы (разбор Codex: 5 FPS — половина времени); перерыв дольше секунды (скрытая вкладка) — пауза
+    qTick(now);   // авто: интервал до этого кадра
     const dtW = (now - last) / 1000; last = now; const dtPh = dtW > 1 ? 0 : dtW, dt = Math.min(0.1, dtPh);
     const cyc = st.mode === 'sn' ? effSn().snCycle : effStar().cycle;
     // событие — вспышка или выброс (разбор Codex): поле на время события — снимок, поверхность стоит (звезда не поворачивается), идут часы события
@@ -572,8 +631,11 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     const hs = corona && corona.hydroStatus && corona.hydroStatus(), hms = x => { x = Math.max(0, Math.floor(x)); return [Math.floor(x / 3600), Math.floor(x / 60) % 60, x % 60].map(v => String(v).padStart(2, '0')).join(':'); };
     const gas = hs && hs.on ? ` · <b>поле: снимок · газ: ${hs.rate}× / фактически ${Math.round(hs.eff)}× · возраст ${hms(hs.age)} · отставание ${hs.lagReal.toFixed(1).replace('.', ',')} с · петель ${hs.n}/${hs.K}</b>${hs.err ? ` · ошибок ${hs.err}` : ''}` : '';
     $('hud').innerHTML = `<b>${st.name || st.sp}</b> · ${st.mode === 'sn' ? 'сверхновая' : 'звезда'} · t = ${t.toFixed(1)} с · ${ph}${day}${gas} · камера ${orbit.dist.toFixed(1)} R★${star.particles ? ` · частицы ${star.perf().toFixed(1)} мс/кадр` : ''} · тянуть — вращать, правая кнопка или Shift — сдвиг, колесо — дистанция, двойной щелчок — сброс`;
+    if (corona && corona.lost && corona.lost()) buildCorona();   // восстановлен контекст видеокарты — корона заново из текущих входов (разбор Codex) — до решения о покрытии фотосферы (разбор Codex)
+    // вес ультрафиолета 1 — картинка короны закрывает кадр целиком (непрозрачна и вне диска): фон и фотосферу не рисовать (разбор Codex)
+    const cover = !!(corona && st.mode !== 'sn' && corona.stats().baked && corona.weight(cam) >= 0.999);
+    bgStars.visible = shown.stars && !cover; if (star.surf) star.surf.visible = shown.photo && !cover;
     profPoll(); if (star.drawSpots) timed('spotmap', () => star.drawSpots()); drawScene();
-    if (corona && corona.lost && corona.lost()) buildCorona();   // восстановлен контекст видеокарты — корона заново из текущих входов (разбор Codex)
     if (corona) {
       // перестройка по ходу жизни поля (автор: «в газодинамической пятна не соответствуют?», «перескакивает одно в другое и стоит»):
       // пока идёт время — снимки полюсов и нагрева подряд, каждый считается по слою за кадр, корона непрерывно перетекает к последнему
@@ -583,18 +645,18 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
       // поле стоит — дописывает круг сдвигов внутри ячейки и замирает. Объём выше — снимками с перетеканием (входы — копия живых в момент снимка)
       // входы (заряды, нагрев) — по смене часов при любых выключателях (разбор Codex: без живой текстуры нагрев объёма замирал); без текстуры — без сетки
       corona.setFrame(star.group.matrixWorld); corona.look(cam); if (corona.setPoles) corona.setPoles(star.polesView ? star.polesView() : star.poles);   // полюса показа — для оснований трубок   // система звезды и камера — до выбора плиток (видимое — чаще)
-      const ch = clk !== coronaLiveClk; coronaLiveClk = clk;
-      if (st.euvSurf === true || (corona.tubesOn && corona.tubesOn())) timed('surface', () => ch ? corona.live(...coronaInputs()) : corona.live(null, null));
+      const cw = corona.weight(cam) > 0.001, ch = clk !== coronaLiveClk; if (cw) coronaLiveClk = clk;   // корона не видна (камера далеко) — без обслуживания; вернулась — входы сразу
+      if (!cw) { /* не видна */ } else if (st.euvSurf === true || (corona.tubesOn && corona.tubesOn())) timed('surface', () => ch ? corona.live(...coronaInputs()) : corona.live(null, null));
       else if (ch) timed('heat', () => corona.inputs(...coronaInputs(), true));
       if (corona.hydroTick) corona.hydroTick(dtPh, playing);
       { const hh = hydroHold(); if (hh !== holdWas) { holdWas = hh; applyDbg(); } }   // удержание поверхности — по фактическому снимку   // газодинамика в трубках: часы газа, обмен с фоновыми потоками, смешение
       const volOn = st.euvGas !== false || corona.uniforms.uFur.value > 0;   // объём нужен газу или меху (и при трубках — для края)
-      if (comp.rebake && volOn) { if (!corona.building() && clk > coronaClk && corona.beginBake()) coronaClk = clk;
-        timed('rebake', () => corona.stepBake(1)); corona.stepFade(dtW, 1); }
-      if (volOn) timed('emit', () => corona.emitLive(comp.emit));   // яркость короны над краем — по живому нагреву (автор: «корону живой»); выключено — только по новой форме
+      if (comp.rebake && volOn && cw) { if (!corona.building() && clk > coronaClk && corona.beginBake()) coronaClk = clk;
+        if (++bakeTick % QLV[qLv].bake === 0) timed('rebake', () => corona.stepBake(1)); corona.stepFade(dtW, 1); }   // слой перестройки — раз в bake кадров (уровень показа)
+      if (volOn && cw) timed('emit', () => corona.emitLive(comp.emit));   // яркость короны над краем — по живому нагреву (автор: «корону живой»); выключено — только по новой форме
       cpu.snap = cpu.snap * 0.9 + (performance.now() - tc0) * 0.1;
       corona.setFrame(star.group.matrixWorld);   // звезда может вращаться: луч — в системе звезды
-      if (coronaCal && view.clientWidth > 0 && now - coronaCalT > 500) { coronaCalT = now; if (corona.calibrate(cam)) coronaCal = false; }   // повтор — не чаще 2 раз в секунду
+      if (coronaCal && cw && view.clientWidth > 0 && now >= coronaCalT && ++coronaCalF >= 3) { coronaCalF = 0; qSkip(); if (corona.calibrate(cam)) coronaCal = false; else coronaCalT = now + Math.min(8000, 500 * Math.pow(2, coronaCalK++)); }   // неудача — повтор не раньше чем через 3 кадра и 0,5·2ᵏ с (до 8 с): между попытками — обычные кадры для авто (разбор Codex)
       timed('euv', () => corona.render(cam, undefined, undefined, now / 1000)); }
   }
   $('spec').value = st.sp; $('starName').value = st.name || '';
@@ -603,10 +665,10 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
   // ---- панель «Компоненты звезды» (автор, 15.10: «выведи мне все компоненты, из которых звезда состоит, — чтоб я мог их отключать и подумать над
   // оптимизацией»): выключатели и цена — процессор (живой замер, мс на кадр) и видеокарта (по кнопке: каждая часть рисуется отдельно
   // 10 раз с ожиданием видеокарты)
-  const comp = { rebake: true, emit: true }, cpu = { update: 0, snap: 0, frame: 16 }, gpuT = {};
+  const comp = { rebake: true, emit: true }, cpu = { update: 0, snap: 0, frame: 16 }, gpuT = {}, shown = { stars: true, photo: true };
   const COMP = [
-    ['stars', 'фон звёзд', () => bgStars.visible, v => { bgStars.visible = v; }],
-    ['photo', 'фотосфера (шар)', () => !star.surf || star.surf.visible, v => { if (star.surf) star.surf.visible = v; }],
+    ['stars', 'фон звёзд', () => shown.stars, v => { shown.stars = !!v; }],
+    ['photo', 'фотосфера (шар; под непрозрачным ультрафиолетом не рисуется)', () => shown.photo, v => { shown.photo = !!v; }],
     ['spots', 'пятна на фотосфере', () => !(star.debug && star.debug().noSpots), v => { compKeep = Object.assign(compKeep || {}, { noSpots: !v }); applyDbg(); }, true],
     ['gran', 'грануляция (фотосфера «как видит глаз»)', () => effStar().granPhys > 0, v => { if (!(star.phys && star.phys.eyeXY)) return; st.star.granPhys = v ? 1 : 0; star.setLook({ granPhys: st.star.granPhys }); save(); }, true],
     ['life', 'жизнь поверхности: полюса, карта (процессор)', () => !(star.debug && star.debug().noSurface), v => { compKeep = Object.assign(compKeep || {}, { noSurface: !v }); applyDbg(); }],
@@ -618,7 +680,7 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     ['surface', 'живая текстура нижнего слоя (каждый кадр; выключена — газ одним слоем до поверхности)', () => st.euvSurf === true, v => { st.euvSurf = !!v; if (corona) corona.uniforms.uSurfOn.value = v ? 1 : 0; save(); }, true],
     ['cubic', 'объём короны — плавная выборка между ячейками (без ступеней по сетке; выключено — линейная, ломаная)', () => st.euvCubic !== false, v => { st.euvCubic = !!v; if (corona) corona.uniforms.uCubic.value = v ? 1 : 0; save(); }, true],
     ['tone', 'тон как у снимков AIA 171 — √ яркости (выключено — логарифм: перепады сжаты)', () => st.euvTone !== 'log', v => { st.euvTone = v ? 'aia' : 'log'; if (corona && corona.setTone) corona.setTone(v); save(); }, true],
-    ['emit', 'яркость объёма по живому нагреву (каждый кадр)', () => comp.emit, v => { comp.emit = v; }, true],
+    ['emit', 'яркость объёма — пересчёт при событии и смене параметров (выключено — только по новой форме)', () => comp.emit, v => { comp.emit = v; }, true],
     ['rebake', 'форма петель объёма — снимками по ходу поля', () => comp.rebake, v => { comp.rebake = v; }, true],
     ['flares', 'вспышка (сценарная)', () => st.flares, v => { if ($('optFlares').checked !== v) $('optFlares').click(); }],
     ['cme', 'выброс (сценарный)', () => st.cme, v => { if ($('optCme').checked !== v) $('optCme').click(); }],
@@ -637,20 +699,26 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     if (prof.ext && prof.on) { const E = prof.ema, live = { stars: E.stars, photo: E.photo, spots: E.spotmap, euv: E.euv, rebake: E.rebake, surface: E.surface, emit: E.emit, arches: (E.arches || 0) + (E.field || 0), glow: E.glow, earth: E.other };
       for (const [k] of COMP) if ($('cg_' + k)) $('cg_' + k).textContent = live[k] != null ? f(live[k]) : (k === 'gran' ? 'в фотосфере' : k === 'fur' ? 'в короне' : '');
       const tot = ['stars', 'photo', 'spotmap', 'arches', 'field', 'other', 'glow', 'euv', 'rebake', 'heat', 'surface', 'emit'].reduce((a, k) => a + (E[k] || 0), 0);
-      $('compFps').title = `видеокарта, всего ≈ ${tot.toFixed(1)} мс на кадр; снимок нагрева короны (раз на снимок) — ${E.heat != null ? E.heat.toFixed(2) : '—'} мс`;
+      $('compFps').title = `видеокарта, всего ≈ ${tot.toFixed(1)} мс на кадр; карта нагрева короны (среднее на кадр) — ${E.heat != null ? E.heat.toFixed(2) : '—'} мс`;
       $('compFps').textContent += ` · видеокарта ≈ ${f(tot)}`; return; }
     for (const [k] of COMP) if (gpuT[k] != null && $('cg_' + k)) $('cg_' + k).textContent = f(gpuT[k]); }
   // ---- живой замер видеокарты (разбор Codex: performance.now + gl.finish — это процессор и видеокарта вместе, шумно): таймеры видеокарты
   // EXT_disjoint_timer_query_webgl2 — каждая часть рисуется отдельным проходом под своим таймером, результат читается через кадр-два
   // (без ожидания), замеры при сбое таймера (disjoint) отбрасываются; среднее — скользящее по кадрам. Нет расширения — кнопка (попарная разница)
-  const prof = { gl: renderer.getContext(), ext: null, pend: [], ema: {}, on: true };
+  const prof = { gl: renderer.getContext(), ext: null, pend: [], ema: {}, on: !!$('compBox').open, f: 0 };
+  $('compBox').addEventListener('toggle', () => { prof.on = !!$('compBox').open; });
   try { prof.ext = prof.gl.getExtension('EXT_disjoint_timer_query_webgl2'); } catch (e) { prof.ext = null; }
   function timed(label, fn) { if (!prof.on || !prof.ext) return fn(); const gl = prof.gl, q = gl.createQuery(); gl.beginQuery(prof.ext.TIME_ELAPSED_EXT, q);
-    try { return fn(); } finally { gl.endQuery(prof.ext.TIME_ELAPSED_EXT); prof.pend.push([label, q]); } }
-  function profPoll() { if (!prof.ext) return; const gl = prof.gl, dis = gl.getParameter(prof.ext.GPU_DISJOINT_EXT), keep = [], sum = {};
-    if (dis) { for (const [, q] of prof.pend) gl.deleteQuery(q); prof.pend = []; return; }   // сбой таймера — все ожидающие замеры недостоверны
-    for (const [l, q] of prof.pend) { if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) { if (!dis) sum[l] = (sum[l] || 0) + gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; gl.deleteQuery(q); } else keep.push([l, q]); }
-    prof.pend = keep.length > 200 ? keep.slice(-200) : keep; for (const l in sum) prof.ema[l] = prof.ema[l] == null ? sum[l] : prof.ema[l] * 0.9 + sum[l] * 0.1; }
+    try { return fn(); } finally { gl.endQuery(prof.ext.TIME_ELAPSED_EXT); prof.pend.push([label, q, prof.f]); } }
+  function profPoll() { if (!prof.ext) return; prof.f++; const gl = prof.gl, dis = gl.getParameter(prof.ext.GPU_DISJOINT_EXT), P = prof.pend, keep = [];
+    if (dis) { for (const [, q] of P) gl.deleteQuery(q); prof.pend = []; return; }   // сбой таймера — все ожидающие замеры недостоверны
+    // кадр — когда готовы все его замеры (готовятся по порядку); часть, не рисовавшаяся в кадре, — ноль: среднее на кадр (разбор Codex)
+    for (let i = 0, j; i < P.length; i = j) { for (j = i; j < P.length && P[j][2] === P[i][2]; j++);
+      const g = P.slice(i, j); if (keep.length || !g.every(([, q]) => gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE))) { keep.push(...g); continue; }
+      const sum = {}; for (const [l, q] of g) { sum[l] = (sum[l] || 0) + gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; gl.deleteQuery(q); }
+      for (const l of new Set([...Object.keys(prof.ema), ...Object.keys(sum)])) prof.ema[l] = prof.ema[l] == null ? sum[l] || 0 : prof.ema[l] * 0.9 + (sum[l] || 0) * 0.1; }
+    while (keep.length > 400) { const f0 = keep[0][2]; while (keep.length && keep[0][2] === f0) gl.deleteQuery(keep.shift()[1]); }   // лишние — целыми кадрами
+    prof.pend = keep; }
   // сцена: при замере — по частям (фон, фотосфера, прочее звезды — частицы и выброс, Земля, остальное) одним кадром без очистки между
   // проходами — картинка та же; без замера — одним проходом
   function drawScene() {
@@ -691,8 +759,14 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
       if (glow0) gpuT.glow = d(without(() => { st.glow = false; }, restore));
     } finally { restore(); }
     $('compFps').title = `весь кадр (как в обычном кадре): ${gpuT.frame.toFixed(1)} мс; цена части — разница с кадром без неё (время процессора и видеокарты вместе)`; compCpu(); }
-  $('compMeasure').addEventListener('click', compMeasure);
-  setInterval(() => { compCpu(); }, 500);
-  window.M31Lab = { orbit, st, renderer, scene, cam, build, glow, get star() { return star; }, get corona() { return corona; } };   // для отладки из консоли
-  groups(); build(); compRender(); requestAnimationFrame(frame);
+  $('compMeasure').addEventListener('click', () => { compMeasure(); qHold(1500); });   // замер — не в окно авто
+  function qualityLabel() { const el = $('qualityO'); if (!el) return; const T = QSET[qTier()], q = corona && corona.quality ? corona.quality() : null;
+    el.textContent = (qAuto() ? `сборка — ${T.name}${qGpu ? ' (' + qGpu + ')' : ''}, показ — ${QLV[qLv].name}` : `показ — ${QLV[qLv].name}`) + ` · кадр ${Math.round(cpu.frame)} мс`;
+    el.title = q ? `луч — ${Math.round(q.rayScale * 100)} % холста, шаг ×${q.stepK}, точки слоёв ${q.layers.join('/')}, сетка ${q.grid.join('×')}, ковёр ${q.carpW}, нагрев ${q.heatW}, плотность пикселей ${renderer.getPixelRatio()}` : ''; }
+  $('quality').value = qAuto() ? 'auto' : st.quality;
+  $('quality').addEventListener('change', e => { const v = e.target.value; st.quality = QSET[v] ? v : 'auto'; st.euvNown = false; if (QSET[v]) st.euvN = QSET[v].Np;
+    $('euvN').value = euvGrid().Np; save(); qa.ban = {}; applyLevel(QI[qTier()]); buildCorona(); qualityLabel(); });
+  setInterval(() => { compCpu(); qualityLabel(); }, 500);
+  window.M31Lab = { orbit, st, renderer, scene, cam, build, glow, get star() { return star; }, get corona() { return corona; }, setLevel: applyLevel, get qLv() { return qLv; }, qa };   // для отладки из консоли
+  applyLevel(qLv); groups(); build(); compRender(); nextFrame(frame);
 })();

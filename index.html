@@ -79,6 +79,9 @@
     <button id="evStart" title="событие на якорной области: начинается с нуля и идёт один раз (у Солнца ≈ 3 ч за минуту показа); на это время поверхность и вращение звезды стоят; ещё раз — остановить">▶ начать</button>
   </div>
   <div class="row">
+    <span class="chk" title="авто — сборка короны по устройству (телефон — низкое), показ — по времени кадра; высокое / среднее / низкое — вручную: сетка объёма, ковёр, разрешение луча, шаг; смена — пересборка короны">качество</span><select id="quality" aria-label="качество"><option value="auto">авто</option><option value="high">высокое</option><option value="mid">среднее</option><option value="low">низкое</option></select><span class="cdim" id="qualityO"></span>
+  </div>
+  <div class="row">
     <label class="chk" title="вблизи — корона в ультрафиолете (17,4 нм), вдали — как видит глаз; переход по расстоянию"><input type="checkbox" id="optEuv" checked> ультрафиолет вблизи</label>
     <span class="chk" title="сетка объёма короны (газ выше нижнего слоя и над краем): ячеек по долготе × широте × высоте; нижний слой на диске — отдельная текстура (ниже); время запекания">сетка</span><input type="range" id="euvN" min="48" max="256" step="16" value="128" style="width:90px" aria-label="разрешение сетки ультрафиолета"><output id="euvNO"></output>
   </div>
@@ -113,12 +116,12 @@
   <div class="note">Тянуть — вращать, правая кнопка или Shift — сдвиг, колесо — дистанция, двойной щелчок — сброс. Каталог звёзд: HYG v4.0 и Gaia/SIMBAD (CC BY-SA 4.0). <a href="refs.html" target="_blank" style="color:var(--acc)">Ориентиры — настоящие снимки Солнца</a>.</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
-<script src="stars.js?v=5e7f533b92"></script>
-<script src="star-model.js?v=5e7f533b92"></script>
-<script src="surface-state.js?v=5e7f533b92"></script>
-<script src="photosphere.js?v=5e7f533b92"></script>
-<script src="cme-particles.js?v=5e7f533b92"></script>
-<script src="corona.js?v=5e7f533b92"></script>
-<script src="lab.js?v=5e7f533b92"></script>
+<script src="stars.js?v=1be8b3de7d"></script>
+<script src="star-model.js?v=1be8b3de7d"></script>
+<script src="surface-state.js?v=1be8b3de7d"></script>
+<script src="photosphere.js?v=1be8b3de7d"></script>
+<script src="cme-particles.js?v=1be8b3de7d"></script>
+<script src="corona.js?v=1be8b3de7d"></script>
+<script src="lab.js?v=1be8b3de7d"></script>
 </body>
 </html>

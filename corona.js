@@ -604,6 +604,7 @@
     // подгонка по профилю края SDO: с одной плотной частью край ярче середины диска в 13 раз, на снимке — в ≈ 3. uChCut — высота, выше которой
     // касательный столб обоих поглотителей меньше 10⁻⁶ (отсечка по самой толщине, не по числу шкал высот)
     uniform vec2 uChH, uChT0; uniform float uChCut, uTone, uIs;
+    uniform float uStepK; uniform int uLN0, uLN1, uLN2;   // уровень качества: множитель шага марша; точки слоёв ковра, протяжённой короны, мха
     uniform float uEvOn, uEvU, uPixA, uCmeE; uniform vec3 uEvM, uEvAx, uEvSide, uDim; uniform vec4 uRib, uCme; uniform vec2 uCmeRho;
     ${PART_GLSL}
     vec2 evSU(vec3 q) { q = normalize(q); return vec2(asin(clamp(dot(q, uEvAx), -1.0, 1.0)), atan(dot(q, uEvSide), dot(q, uEvM))); }
@@ -694,7 +695,8 @@
       // только через узор меха над кромкой (доля меха × множитель узора); лучи без меха объём не проходят
       for (int k = 0; k < 1500; k++) { if (t >= b || (uGas < 0.5 && fw <= 0.0)) break; vec3 p = o + t * d; float r = length(p);
         float fr = fw * (1.0 - smoothstep(1.3, 1.4, r)), sk = mix(1.0, uFurStep, fr);   // выше 1,4 R★ — без меха и обычным шагом
-        float ds = min(sk * clamp(0.1 * (r - 1.0) + 0.003, 0.003, 0.08), b - t); vec3 ps = o + (t + j * ds) * d;
+        // uStepK — уровень качества: шаг крупнее, отрезок луча покрывается целиком (интеграл e·ds)
+        float ds = min(uStepK * sk * clamp(0.1 * (r - 1.0) + 0.003, 0.003, 0.08), b - t); vec3 ps = o + (t + j * ds) * d;
         vec3 q = uvw(ps); vec4 v = volS(uVol, q); float e = v.r; if (e < 0.0) { nanF |= 1; e = 0.0; }
         float rk = 1.0 - smoothstep(1.3, 1.4, r);
         { float lf = length(v.gba); e *= furM((fwE + fwD * furGate(e)) * rk, lf > 0.2 ? v.gba / lf : vec3(0.0), lf > 0.2); }
@@ -717,7 +719,7 @@
       I = I * (1.0 - wt * uTK) + wt * It;
       // ковёр, протяжённая корона и мох — интегралом вдоль луча (на диске — до поверхности: дальнюю сторону закрывает звезда)
       if (uCarpOn > 0.5) { vec2 tq; float tHit = sphere(o, d, 1.0, tq) && tq.x > 0.0 ? tq.x : -1.0, jt = hash(gl_FragCoord.xy + 17.0);
-        I += layerCol(o, d, tHit, uCarpRs, 0, 16, jt) + layerCol(o, d, tHit, uExtRs, 1, 24, jt) + layerCol(o, d, tHit, uMossRs, 2, 12, jt); }
+        I += layerCol(o, d, tHit, uCarpRs, 0, uLN0, jt) + layerCol(o, d, tHit, uExtRs, 1, uLN1, jt) + layerCol(o, d, tHit, uMossRs, 2, uLN2, jt); }   // dt — по числу точек
       // 4. ленты: след пикселя поперёк ленты — с ракурсом (у края поверхность видна наискось — след длиннее)
       if (uEvOn > 0.5 && uRib.z > 0.0 && disk) { vec3 qh = normalize(o + ts.x * d); I += okR(ribbon(qh, ts.x * uPixA / max(dot(qh, -d), 0.1)) * chAtt(qh * (1.0 + uMossH), d) * partTall(), 16); }
       // фронт выброса светит своим веществом (автор: «давай выброс пусть летит»; закон — см. uCmeE в setEvent): к лучу — свечение × путь луча во
@@ -840,7 +842,7 @@
     // за кадр тускнела в 2–5 раз, следующий снимок возвращал (замер: ≈ 2,6 ячейки за кадр меняли яркость > 50 % при неизменной геометрии).
     // Запасной путь (карта 128×64 с процессора) — копия массива
     const heatSnap = [0, 1, 2].map(() => ({ rt: makeHeat(HW, HH), cpu: null, tex: null, W: HW, H: HH, useCpu: false }));
-    let lastSpotR = [];   // радиусы теней текущих входов — для отступа под разрешение снимка
+    let lastSpotR = [], emKey = '';   // радиусы теней текущих входов — для отступа под разрешение снимка
     function snapHeat(i) { const sn = heatSnap[i];
       if (bu.uFH.value === fhTex) { if (!sn.cpu) { sn.cpu = new Float32Array(128 * 64); sn.tex = new THREE.DataTexture(sn.cpu, 128, 64, THREE.RedFormat, THREE.FloatType);
           Object.assign(sn.tex, { wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping, magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, flipY: false, generateMipmaps: false }); }
@@ -854,12 +856,12 @@
     const ru = { uVol: { value: vols[0].texture }, uVolB: { value: vols[1].texture }, uHist: { value: null }, uHistD: { value: null }, uDW: { value: null }, uDOn: { value: 0 }, uMix: { value: 0 },
       uRc: { value: 1 + o.shell }, uMuA: { value: o.muA }, uMuB: { value: o.muB }, uSurfOn: { value: o.surf }, uCamRot: { value: new THREE.Matrix3() }, uCam: { value: new THREE.Vector3() }, uTanH: { value: 0.4 }, uAspect: { value: 1 }, uRmin: { value: rMin }, uRmax: { value: o.rMax },
       uI0: { value: 1 }, uIw: { value: 100 }, uW: { value: 1 }, uRaw: { value: 0 }, uSteps: { value: 600 },
-      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uPOn: { value: 0 }, uPBnd: { value: new Float32Array(9) }, uNanDbg: { value: o.nanDbg ? 1 : 0 }, uCubic: { value: o.cubic != null ? o.cubic : 1 }, uPT0: { value: null }, uPT1: { value: null }, uPE0: { value: null }, uPE1: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
+      uCarp: { value: null }, uMoss: { value: null }, uMossH: { value: 0.004 }, uChH: { value: new THREE.Vector2(0.0015, 0.005) }, uChT0: { value: new THREE.Vector2(0, 0) }, uChCut: { value: 0 }, uTone: { value: o.tone != null ? o.tone : 1 }, uIs: { value: 1 }, uCarpRs: { value: 1.06 }, uExtRs: { value: 1.45 }, uMossRs: { value: 1.024 }, uNet2: { value: null }, uNetK2: { value: 4 }, uExtNet: { value: o.extNet != null ? o.extNet : 0.8 }, uCarpOn: { value: 0 }, uFurDisk: { value: o.furDisk != null ? o.furDisk : 0 }, uFurLo: { value: o.furLo != null ? o.furLo : 0.4 }, uFurHi: { value: o.furHi != null ? o.furHi : 0.65 }, uTubes: { value: 0 }, uTK: { value: o.tubeDim != null ? o.tubeDim : 0.8 }, uTRamp: { value: 0 }, uTW0: { value: o.tubeMu0 != null ? o.tubeMu0 : 0.3 }, uTW1: { value: o.tubeMu1 != null ? o.tubeMu1 : 0.6 }, uTA: { value: null }, uPOn: { value: 0 }, uPBnd: { value: new Float32Array(9) }, uNanDbg: { value: o.nanDbg ? 1 : 0 }, uCubic: { value: o.cubic != null ? o.cubic : 1 }, uStepK: { value: 1 }, uLN0: { value: 16 }, uLN1: { value: 24 }, uLN2: { value: 12 }, uPT0: { value: null }, uPT1: { value: null }, uPE0: { value: null }, uPE1: { value: null }, uGas: { value: o.gas != null ? o.gas : 1 }, uFur: { value: o.fur }, uFurK1: { value: o.R / 7e7 }, uFurK2: { value: o.R / 2.5e8 }, uFurSig: { value: o.furSig }, uFurNorm: { value: 1 }, uFurStep: { value: o.furStep }, uTime: { value: 0 } };
     Object.assign(ru, evU);   // событие: ленты, пузырь выброса, затемнение
     const rayMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: RAY_FS, uniforms: ru, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
     const rq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), rayMat), rs = new THREE.Scene(); rq.frustumCulled = false; rs.add(rq);
-    const rayScale = o.rayScale != null ? o.rayScale : 0.5, dbs = new THREE.Vector2(); let halfRT = null;
+    let rayScale = o.rayScale != null ? o.rayScale : 0.5; const dbs = new THREE.Vector2(); let halfRT = null;   // доля разрешения луча — меняет уровень качества (цели луча, частиц, трубок — по размеру сами)
     const upMat = new ShaderMat({ glslVersion: THREE.GLSL3, vertexShader: RAY_VS, fragmentShader: UP_FS, uniforms: { uT: { value: null } }, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, toneMapped: false });
     const uq = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), upMat), us = new THREE.Scene(); uq.frustumCulled = false; us.add(uq);
@@ -875,11 +877,12 @@
       for (let i = 0; i < NCMAX; i++) uC[i].set(i < n ? C[i * 4] : 0, i < n ? C[i * 4 + 1] : 0, i < n ? C[i * 4 + 2] : 0, i < n ? C[i * 4 + 3] : 0);
       bu.uNC.value = n; bu.uDip.value = C.dip || 0; bu.uDipU.value = C.dipU || 0; bu.uGU.value = C.gUnit; if (C.dipM) bu.uDipM.value.fromArray(C.dipM);
       if (gridSurf > 0.5) { if (noGrid) gridStale = true; else { buildGrid(); gridStale = false; } }   // поле — в сетку (только для живой текстуры)
-      heatDirty = true; inVer++; briVer++; heatVer++;   // нагрев сменился — яркость устарела; новая версия входов — форма всех плиток устарела
+      inVer++; briVer++; heatVer++;   // новая версия входов — форма плиток и слой ковра устарели; яркость объёма — нет (у снимка свой нагрев; разбор Codex)
       if (fh && fh.spots) {   // карта нагрева на видеокарте: {spots: [x, y, z, угловой радиус тени], Bconc, carpetG, vh, tanTheta, su, etaEps}
         const L = Math.min(64, fh.spots.length); for (let i = 0; i < 64; i++) { const q = fh.spots[i]; if (i < L) sp[i].set(q[0], q[1], q[2], q[3]); else sp[i].set(0, 1, 0, 0); }
         lastSpotR = fh.spots.slice(0, L).map(q => q[3]);
         Object.assign(hu.uNS, { value: L }); hu.uBconc.value = fh.Bconc; hu.uCarpet.value = fh.carpetG; hu.uDrv.value = fh.vh * fh.tanTheta; hu.uSu.value = fh.su; hu.uEtaEps.value = fh.etaEps;
+        { const ek = fh.Bconc + '|' + fh.carpetG + '|' + fh.su; if (ek !== emKey) { emKey = ek; heatDirty = true; } }   // общие с яркостью объёма (тёплая доля) — сменились: пересчитать
         if (DET.on && detOK && !heat2) heat2 = makeHeat(HW * 2, HH * 2); heatCur = DET.on && heat2 ? heat2 : heatRT;
         const hw = heatCur.width, hh = heatCur.height, m = 1.5 * Math.PI / hh; hu.uW.value = hw; hu.uH.value = hh;
         for (let i = 0; i < 64; i++) spC[i] = i < L ? Math.cos(Math.min(Math.PI, fh.spots[i][3] + m)) : 2;
@@ -896,7 +899,8 @@
     // яркость по геометрии снимка i — живым нагревом (все слои)
     function emit(i) { const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel(); quad.material = emitMat; useSnap(i); eu.uGeo.value = geos[i].texture;
       try { for (let k = 0; k < o.Nr; k++) { eu.uLayer.value = k; renderer.setRenderTarget(vols[i], k, 0); renderer.render(qs, qc); } } finally { quad.material = bakeMat; renderer.setRenderTarget(prev, face, mip); } }
-    // кадр яркости: пришла новая геометрия или (heat ≠ false) сменился нагрев — пересчитать показываемые (F и, если готов, N)
+    // кадр яркости: пришла новая геометрия или (heat ≠ false) сменились параметры свечения или событие — пересчитать показываемые (F и, если готов, N);
+    // новые входы поверхности сами по себе — нет: яркость снимка считается по его карте нагрева (снята вместе с геометрией)
     function emitLive(heat) { if (!S.baked || !(geoDirty || (heat !== false && heatDirty))) return false; emit(iF); if (nReady) emit(iN); geoDirty = heatDirty = false; return true; }
     // ---- сборка нижнего слоя (база 1024 на всю звезду; подробный 2048 — около точки под камерой): цели, свои параметры шейдеров, плитки T×T,
     // их обход по фазам 2×2 (видимое — чаще, по возрасту), плавная смена формы, яркость по плиткам. LB — линий за кадр; det — подробный слой:
@@ -1021,10 +1025,11 @@
     // (обычный вид 6,2 R★ — ≈ 1,25: выключен; 3 R★ — ≈ 3,2)
     const DET = { on: false, rho: 0.8, fadeIn: 0.35 }, DET_ON = o.detOn != null ? o.detOn : 1.6, DET_OFF = o.detOff != null ? o.detOff : 1.35, detW = 2 * o.surfW, detOK = o.detail !== 0 && o.surfW === 1024;
     let detPx = 0, detAllow = !!o.detAllow;   // по умолчанию выключен: вблизи с ним 15 к/с (автор: «тут всё дергается»)   // точек луча на ячейку базы в центре диска (look); detAllow — выключатель стенда
-    let detail = null, detAny = false;
+    let detail = null, detAny = false, baseStale = false;   // baseStale — текстура не заполнена (собрали без неё)
     // кадр нижнего слоя: C, fh — входы сейчас (null — прежние: поле стоит)
     function live(C, fh) { if (!S.baked) return false;
       if (C && !hydFrozen()) setInputs(C, fh);   // газодинамика в трубках: поле — снимок (входы не принимаются)
+      if (baseStale) { if (gridStale) { buildGrid(); gridStale = false; } baseStale = false; bu.uGOn.value = gridSurf; base.fill(); if (detail) detail.reset(); }   // собрали без текстуры — заполнить при первом кадре с ней
       if (gridStale) { buildGrid(); gridStale = false; }   // текстуру снова включили — сетка по текущим зарядам
       if (tubes.on) { bu.uGOn.value = gridSurf; tubesFrame(); }   // трубки — середине диска; текстура и объём — краю (автор: «по краю … корону из газа — а в центре трубки»)
       bu.uGOn.value = gridSurf; const b = base.step(!!C);
@@ -1036,12 +1041,12 @@
       detPx = dbs.y * rayScale / (2 * Math.tan(camera.fov * Math.PI / 360) / (camera.zoom || 1)) / Math.max(1e-3, camS.length() - 1) * (2 * Math.PI / o.surfW); }
     function readHeat() { const w = heatCur.width, h = heatCur.height, buf = new Float32Array(w * h * 4); renderer.readRenderTargetPixels(heatCur, 0, 0, w, h, buf); return { buf, W: w, H: h }; }
     // полное запекание — сразу в показываемый объём (при сборке)
-    function bake(C, fh) {
-      const t0 = performance.now(); job = null; nReady = false; ru.uMix.value = 0; ru.uVol.value = vols[iF].texture; setInputs(C, fh); freezeVol(); snapHeat(iF); const geo = geos[iF];
+    function bake(C, fh, noSurf) {   // noSurf — нижняя текстура и трубки выключены: без сетки поля и заполнения текстуры (до первого live)
+      const t0 = performance.now(); job = null; nReady = false; ru.uMix.value = 0; ru.uVol.value = vols[iF].texture; setInputs(C, fh, !!noSurf); freezeVol(); snapHeat(iF); const geo = geos[iF];
       const prev = renderer.getRenderTarget(), face = renderer.getActiveCubeFace(), mip = renderer.getActiveMipmapLevel();
       for (let k = 0; k < o.Nr; k++) { bv.uLayer.value = k; renderer.setRenderTarget(geo, k, 0); renderer.render(qs, qc); }
       renderer.setRenderTarget(prev, face, mip); emit(iF); geoDirty = heatDirty = false;
-      bu.uGOn.value = gridSurf; base.fill(); if (detail) detail.reset(); detAny = false; ru.uDOn.value = 0;
+      if (noSurf) baseStale = true; else { bu.uGOn.value = gridSurf; base.fill(); baseStale = false; } if (detail) detail.reset(); detAny = false; ru.uDOn.value = 0;
       // доли линий по типу (выборка — один слой у поверхности и один повыше)
       const cnt = [0, 0, 0, 0, 0], buf = new Float32Array(o.Np * o.Nt * 4), gl = renderer.getContext();
       for (const k of [2, Math.floor(o.Nr / 2)]) { renderer.setRenderTarget(geo, k, 0); gl.readPixels(0, 0, o.Np, o.Nt, gl.RGBA, gl.FLOAT, buf);
@@ -1102,6 +1107,10 @@
       const med = dk[dk.length >> 1], hi = v[Math.min(v.length - 1, Math.floor(v.length * 0.997))], cmed = dc.length >= 30 ? dc[dc.length >> 1] : 0.63 * med;   // 0,63 — середина к диску у Солнца
       S.I0 = ru.uI0.value = Math.max(1e-12, 0.05 * med); S.Iw = ru.uIw.value = Math.max(hi, 2 * S.I0); S.Is = ru.uIs.value = Math.max(1e-12, 7.3 * cmed); S.cal.med = med; S.cal.cmed = cmed; return true;
     }
+    // уровень качества (стенд; автор: «надо будет сделать упрощение»; разбор Codex): доля разрешения луча, множитель шага марша, точки слоёв —
+    // без пересборки (объём, нагрев и сеть от них не зависят); шаг крупнее — отрезок луча покрывается целиком, предел 1500 — защитный
+    function setQuality(q) { q = q || {}; if (q.rayScale != null) rayScale = Math.min(1, Math.max(0.15, +q.rayScale)); if (q.stepK != null) ru.uStepK.value = Math.min(3, Math.max(1, +q.stepK));
+      if (q.layers) { const c = (x, d) => Math.max(2, Math.min(32, (x | 0) || d)); ru.uLN0.value = c(q.layers[0], 16); ru.uLN1.value = c(q.layers[1], 24); ru.uLN2.value = c(q.layers[2], 12); } }
     function setCam(camera) { camera.updateMatrixWorld(); camL.multiplyMatrices(frameInv, camera.matrixWorld); ru.uCamRot.value.setFromMatrix4(camL); ru.uCam.value.setFromMatrixPosition(camL);
       ru.uTanH.value = Math.tan(camera.fov * Math.PI / 360) / (camera.zoom || 1); ru.uAspect.value = camera.aspect; }
     // вес ультрафиолета по расстоянию камеры до центра звезды: ближе near0 — 1, дальше near1 — 0
@@ -1586,7 +1595,7 @@
         let acc = null; if (tubes.acc) { acc = new Float32Array(tubes.acc.width * tubes.acc.height * 4); renderer.setRenderTarget(tubes.acc); gl.readPixels(0, 0, tubes.acc.width, tubes.acc.height, 0x1908, 0x1406, acc); }
         renderer.setRenderTarget(prev); return { pa, acc, accW: tubes.acc && tubes.acc.width, accH: tubes.acc && tubes.acc.height, seed: tSeedData.slice(0, 40) }; }, tubesOn: () => tubes.on, setPoles: pv => { if (!hydFrozen()) tubes.poles = pv; },
       readTubes: () => { const prev = renderer.getRenderTarget(), b1 = new Float32Array(TN * 4), b2 = new Float32Array(TN * 4); renderer.setRenderTarget(tLen); renderer.getContext().readPixels(0, 0, 1, TN, 0x1908, 0x1406, b1); renderer.setRenderTarget(tGas); renderer.getContext().readPixels(0, 0, 1, TN, 0x1908, 0x1406, b2); renderer.setRenderTarget(prev); return { len: b1, gas: b2 }; },
-      diag: () => base.diag(), bake, live, look, prepMeasure, emitLive, detail: () => ({ on: DET.on, any: detAny, px: detPx, allow: detAllow, layer: detail }), setDetail: v => { detAllow = !!v; }, measureEmit, inputs: (C, fh, ng) => { if (!hydFrozen()) setInputs(C, fh, ng); }, beginBake, stepBake, stepFade, setFrame, busy: () => !!job, building: () => !!job, measureLayer, measureSurf, readHeat, readSurf, buildGrid, readGrid: k => { const buf = new Float32Array(GNp * GNt * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(gridRT, k, 0); renderer.getContext().readPixels(0, 0, GNp, GNt, 0x1908, 0x1406, buf); renderer.setRenderTarget(prev); return { buf, GNp, GNt, GNr }; }, charges: () => bu.uNC.value, bakeUniforms: bu, volUniforms: bv, calibrate, render, weight, readLayer, dispose, stats: () => S, opts: o, uniforms: ru };
+      diag: () => base.diag(), bake, live, look, prepMeasure, emitLive, detail: () => ({ on: DET.on, any: detAny, px: detPx, allow: detAllow, layer: detail }), setDetail: v => { detAllow = !!v; }, measureEmit, inputs: (C, fh, ng) => { if (!hydFrozen()) setInputs(C, fh, ng); }, beginBake, stepBake, stepFade, setFrame, busy: () => !!job, building: () => !!job, measureLayer, measureSurf, readHeat, readSurf, buildGrid, readGrid: k => { const buf = new Float32Array(GNp * GNt * 4), prev = renderer.getRenderTarget(); renderer.setRenderTarget(gridRT, k, 0); renderer.getContext().readPixels(0, 0, GNp, GNt, 0x1908, 0x1406, buf); renderer.setRenderTarget(prev); return { buf, GNp, GNt, GNr }; }, charges: () => bu.uNC.value, bakeUniforms: bu, volUniforms: bv, calibrate, render, weight, readLayer, dispose, setQuality, quality: () => ({ rayScale, stepK: ru.uStepK.value, layers: [ru.uLN0.value, ru.uLN1.value, ru.uLN2.value], grid: [o.Np, o.Nt, o.Nr], carpW: CW, heatW: HW }), stats: () => S, opts: o, uniforms: ru };
   }
   const api = { create, supported, furNorm };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
