@@ -205,6 +205,9 @@
   if ((st.hou | 0) < 72) { for (const k of ['labCmeHot', 'labCmeHotE']) st.star[k] = PHYS[k]; st.hou = 72; }
   // перенос с Солнца на другие звёзды (автор: «надо к остальным звёздам всё подключать») — к текущей звезде; пресет — поверх правил
   if ((st.hou | 0) < 73) { const pr = PRESETS.find(x => x[0] === st.name); st.star = Object.assign({}, PHYS, labActivity(st.name, st.sp, st.comp, st.R), pr ? pr[4] || {} : {}); st.hou = 73; }
+  // сетка объёма — 160 по долготе (автор: «линии не очень хорошо читаются в центре диска — но это на солнце»): у Солнца области в 2–3 ячейки
+  // сетки 96 — петли не разрешались (белое пятно со штриховкой); при 160 (ячейка 2,2°) видны арки; кадр на стенде тот же (33 мс)
+  if ((st.hou | 0) < 74) { st.euvN = 160; st.hou = 74; }
   const save = () => { try { localStorage.setItem(LS, JSON.stringify(st)); } catch (e) { /* без хранилища */ } };
   function applyChrom() { if (corona && corona.setChrom) { const e = effStar(); corona.setChrom({ H: e.labChH != null ? e.labChH : 1, he: e.labChE != null ? e.labChE : 4, sH: e.labChSH != null ? e.labChSH : 5, se: e.labChSE != null ? e.labChSE : 12 });
       const cL = corona.carpet ? corona.carpet().L : 0.03;
@@ -308,6 +311,16 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   let star = null, sn = null, t = 0, simT = 0, lastStats = 0, playing = true, last = performance.now(), corona = null, coronaCal = false, coronaCalT = 0;   // simT — часы симуляции (пауза их останавливает)
   const cls = () => SM.classParams(st.sp, st.comp);
   const rSunEff = () => st.R || cls().rSun, mSunEff = () => st.M || cls().mSun;   // радиус и масса: примера или по классу
+  // корона солнечного типа (автор: «арктур бетельгейзе и ригель не видно, белый карлик странный»): только у звёзд с конвективной оболочкой
+  // главной последовательности и субгигантов F–M. У O/B/A нет конвективной оболочки — нет динамо и горячей короны (рентген горячих звёзд —
+  // от ударов в ветре); холодные гиганты K–M (Арктур, Бетельгейзе) — за «разделительной линией» корон (Linsky & Haisch 1979): хромосфера и
+  // ветер, горячей короны нет; у белого карлика короны нет. Для них ультрафиолет 17,1 нм не строится — видна фотосфера, в карточке — причина
+  const noCorona = () => { const c = cls(), k = c.info; if (k.lum === 'D') return 'белый карлик: короны нет — видна фотосфера (в видимом свете)';
+    if (!c.convective) return `${k.cls}-звезда без конвективной оболочки: нет динамо и горячей короны (рентген горячих звёзд — от ударов в ветре) — видна фотосфера`;
+    if (k.lum === 'III' || k.lum === 'I') return k.cls === 'M' || (k.cls === 'K' && k.sub >= 1.5)
+      ? 'холодный гигант за «разделительной линией» корон (Linsky & Haisch 1979): горячей короны нет — хромосфера и ветер; видна фотосфера'
+      : 'корона гигантов не моделируется (у G/F-гигантов она бывает — наблюдения ROSAT); видна фотосфера';   // разбор Codex: класс светимости сам не определяет корону
+    return ''; };
   // газ над открытым полем (автор: «проксима с лысиной» — над полюсом наклонённого диполя корональная дыра была пустой: у всех звёзд
   // n = 10⁸ см⁻³ и T = 1 МК, а закрытая корона Проксимы в десятки раз плотнее — после подстройки яркости дыра — чернота). Теперь — по тем же
   // законам, что и петли (RTV — солнечно-нормированное приближение нижней короны: у открытых трубок энергия уходит ещё и в ветер), от
@@ -322,7 +335,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   const effSn = () => Object.assign({}, SM.SN_DEFAULTS, st.sn);
   function build() {
     if (star) { scene.remove(star.group); star.dispose(); }
-    star = SM.create(THREE, { seed: st.seed, sp: st.sp, comp: st.comp, rKm: st.R ? st.R * SM.R_SUN_KM : 0, mSun: st.M || 0, params: st.star, arches: st.arches, flares: st.flares, cme: st.cme, labLOD: true, renderer,
+    star = SM.create(THREE, { seed: st.seed, sp: st.sp, comp: st.comp, rKm: st.R ? st.R * SM.R_SUN_KM : 0, mSun: st.M || 0, params: st.star, arches: st.arches, flares: st.flares && !noCorona(), cme: st.cme && !noCorona(), labLOD: true, renderer,
       SurfaceState: window.M31SurfaceState, Photosphere: window.M31Photosphere, labDrawSpots: true });
     scene.add(star.group);
     buildCorona();
@@ -342,7 +355,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   // установившемуся нагреву карты поверхности (выпуск = двигатель: F_H = η_H·P_drive/площадь); границы яркости — в первом кадре.
   // Сетка — st.euvN ячеек по долготе, по широте вдвое меньше, по высоте (ln r) втрое (автор: «уменьшаем разрешение сетки — выведи в настройку»)
   // текстура нижнего слоя на поверхности — 2^st.euvS по долготе, вдвое меньше по широте (автор: «надо понижать разрешение текстуры — нет плавности»)
-  const euvGrid = () => { const Np = st.euvN | 0 || 128, sw = 1 << Math.min(11, Math.max(7, st.euvS | 0 || 10)); return { Np, Nt: Np >> 1, Nr: Math.max(8, Math.round(Np / 3)), surfW: sw, surfH: sw >> 1 }; };
+  const euvGrid = () => { const Np = st.euvN | 0 || 160, sw = 1 << Math.min(11, Math.max(7, st.euvS | 0 || 10)); return { Np, Nt: Np >> 1, Nr: Math.max(8, Math.round(Np / 3)), surfW: sw, surfH: sw >> 1 }; };
   function euvLabel() { const g = euvGrid(), R = star ? star.phys.rKm : 0, rMax = star && star.params.rSS > 1 ? star.params.rSS : 2.5;
     const kmH = R * 2 * Math.PI / g.Np, kmR = R * (Math.pow(rMax, 1 / g.Nr) - 1), S = corona && corona.stats();
     $('euvNO').textContent = `${g.Np}×${g.Nt}×${g.Nr} · ячейка ${(kmH / 1000).toFixed(1)}×${(kmR / 1000).toFixed(1)} тыс. км` + (S && S.baked ? ` · ${S.ms.toFixed(0)} мс` : '');
@@ -351,7 +364,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     if (corona) { corona.dispose(); corona = null; }
     const SSo = star && star.surfaceState && star.surfaceState();
     // граница объёма — поверхность источника поля (заряды-изображения построены на ней); без изображений — 2,5 R★
-    if (st.euv !== false && window.M31Corona && SSo && st.mode !== 'sn') {
+    if (st.euv !== false && window.M31Corona && SSo && st.mode !== 'sn' && !noCorona()) {
       if (!M31Corona.supported(renderer)) console.warn('корона: нужен WebGL2 с EXT_color_buffer_float — ультрафиолет выключен');
       else corona = M31Corona.create(THREE, renderer, Object.assign({ R: star.phys.rKm * 1e5, M: star.phys.mSun * 1.989e33, ...openCorona(), rMax: star.params.rSS > 1 ? star.params.rSS : 2.5, gas: st.euvGas === false ? 0 : 1 }, euvGrid())); }
     if (corona) { if (corona.setCarpet) corona.setCarpet(st.euvCarpet === true); applyChrom(); if (corona.setTone) corona.setTone(st.euvTone !== 'log'); corona.uniforms.uSurfOn.value = st.euvSurf === true ? 1 : 0; corona.uniforms.uFurDisk.value = st.euvFurDisk === true ? 1 : 0; corona.uniforms.uCubic.value = st.euvCubic === false ? 0 : 1; if (corona.setHydro) corona.setHydro(false); if (corona.setTubes) corona.setTubes(st.euvTubes === true); if (corona.setPoles) corona.setPoles(star.polesView ? star.polesView() : star.poles); const [C, fh] = coronaInputs(); corona.bake(C, fh); if (corona.setHydro) corona.setHydro(hydroOn); applyDbg(); coronaCal = true; coronaCalT = 0; coronaClk = coronaLiveClk = star.surfClockView ? star.surfClockView() : star.surfClock ? star.surfClock() : 0; }   // часы показа (разбор Codex)
@@ -400,7 +413,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
     $('info').innerHTML = `<span class="sw" style="background:${hex}"></span><b>${k.cls}${k.cls === 'D' ? '' : k.sub} ${k.lum === 'D' ? '' : k.lum}</b> · ${lum} · <b>${k.teff.toLocaleString('ru')} K</b><br>`
       + `R★ = <b>${rS < 0.1 ? rS.toFixed(3) : rS.toFixed(2)} R☉</b> ≈ ${Math.round(rKm).toLocaleString('ru')} км, M★ ≈ ${mSunEff().toFixed(2)} M☉${st.R ? '' : ' (по классу)'} · активность ${c.activity.toFixed(2)} · ${c.convective ? 'конвекция: пятна, арки, вспышки' : 'без конвективной оболочки: поверхность гладкая'}`
       // перенос с Солнца (автор: «надо к остальным звёздам всё подключать»): откуда рентген и поле этой звезды — данные или оценка
-      + (() => { const a = labActivity(st.name, st.sp, st.comp, st.R); if (!a.labLH) return c.convective ? '<br><span style="color:var(--dim)">корона по правилам Солнца — не переносится (гигант/субгигант)</span>' : '';
+      + (() => { const nc = noCorona(); if (nc) return `<br><span style="color:var(--dim)">ультрафиолет 17,1 нм — нет: ${nc}</span>`; const a = labActivity(st.name, st.sp, st.comp, st.R); if (!a.labLH) return c.convective ? '<br><span style="color:var(--dim)">корона — по заготовке стенда (правила Солнца для субгигантов не переносятся)</span>' : '';
         const d = starData(st.name, st.sp, st.comp), lx = a.labLH / 10, f = x => { const e = Math.floor(Math.log10(x)); return (x / Math.pow(10, e)).toFixed(1).replace('.', ',') + '·10' + String(e).split('').map(ch => '⁰¹²³⁴⁵⁶⁷⁸⁹'[+ch]).join(''); };
         return `<br><span style="color:var(--dim)">рентген L<sub>X</sub> ≈ ${f(lx)} эрг/с — ${d ? d.src : 'оценка: спокойная полевая звезда (F<sub>X</sub> = 2·10⁴)'}${d && d.dipNote ? ` · диполь ${d.dip} Гс — ${d.dipNote}` : ` · диполь ${effStar().dipoleG} Гс — допущение стенда (нет данных)`}</span>`; })();
     const comp = $('comp'); comp.innerHTML = k.parts.map((p, i) => `<option value="${i}"${i === (st.comp | 0) ? ' selected' : ''}>${i + 1}: ${p}</option>`).join(''); comp.classList.toggle('hidden', k.parts.length < 2);
@@ -428,10 +441,10 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   $('starList').innerHTML = STARS.map(s => `<option value="${s.name.replace(/"/g, '&quot;')}">${s.sp}</option>`).join('');
   $('starName').addEventListener('change', e => { const s = STARS.find(x => x.name === e.target.value); if (s) setStar(s.sp, s.name, s.sp.split('+').length - 1); });
   $('spec').addEventListener('change', e => setStar(e.target.value.trim() || 'G2V', '', 0));   // свой спектр — радиус и масса по классу
-  $('comp').addEventListener('change', e => { st.comp = +e.target.value; const pr = PRESETS.find(x => x[0] === st.name); st.star = Object.assign({}, PHYS, labActivity(st.name, st.sp, st.comp, st.R), pr ? pr[4] || {} : {}); save(); groups(); build(); });   // другая компонента — другая звезда: правила заново (разбор Codex)
+  $('comp').addEventListener('change', e => { st.comp = +e.target.value; const pr = PRESETS.find(x => x[0] === st.name); st.star = Object.assign({}, PHYS, labActivity(st.name, st.sp, st.comp, st.R), pr ? pr[4] || {} : {}); evActive = false; save(); groups(); build(); evBtn(); });   // другая компонента — другая звезда: правила заново (разбор Codex)
   // смена звезды: параметры — к основе стенда PHYS (+ известное о звезде: диполь), а не к старой модели нитей
   function setStar(sp, name, comp, R, M, ov) { st.sp = sp; st.name = name; st.comp = comp; st.R = R || 0; st.M = M || 0; st.star = Object.assign({}, PHYS, labActivity(name, sp, comp, R), ov || {}); $('spec').value = sp;
-    $('starName').value = STARS.some(s => s.name === name) ? name : ''; groups(); build(); }
+    $('starName').value = STARS.some(s => s.name === name) ? name : ''; evActive = false; groups(); build(); evBtn(); }   // кнопка события — по звезде (без горячей короны — нет)
   for (const [id, key] of [['optFlares', 'flares'], ['optCme', 'cme']]) { $(id).checked = st[key]; $(id).addEventListener('change', e => { st[key] = e.target.checked; build(); }); }
   // глоу: переключатель и ползунки (сила, порог яркости, радиус)
   $('optEuv').checked = st.euv !== false; $('optEuv').addEventListener('change', e => { st.euv = e.target.checked; buildCorona(); save(); });
@@ -444,7 +457,7 @@ gl_FragColor = vec4(uC, 1.0); }`, toneMapped: false }); };
   // событие — по кнопке (автор: «надо кнопку, по которой начинается»): идёт с нуля один раз, на это время поверхность стоит; выключатели
   // «вспышка» и «выброс» — что показать в событии (ни одного — кнопка включает оба); ещё раз — остановить
   let evActive = false;
-  const evBtn = () => { $('evStart').textContent = evActive ? '■ остановить' : '▶ начать'; $('evStart').disabled = st.mode === 'sn'; };   // у сверхновой — нет
+  const evBtn = () => { $('evStart').textContent = evActive ? '■ остановить' : '▶ начать'; $('evStart').disabled = st.mode === 'sn' || !!noCorona(); };   // у сверхновой и у звёзд без горячей короны — нет
   evBtn();
   $('evStart').addEventListener('click', () => {
     if (evActive) { evActive = false; t = 0; evBtn(); return; }
@@ -531,7 +544,7 @@ v_esc ${Math.round(s.vesc)} км/с; 1 с показа ≈ ${Math.round(s.tReal)
     const cyc = st.mode === 'sn' ? effSn().snCycle : effStar().cycle;
     // событие — вспышка или выброс (разбор Codex): поле на время события — снимок, поверхность стоит (звезда не поворачивается), идут часы события
     if (playing) { if (evActive) { t += dt * st.speed; if (t >= cyc) { evActive = false; t = 0; evBtn(); } } else t = (t + dt * st.speed) % cyc; }   // событие — один раз
-    const evOn = st.mode !== 'sn' && evActive && (st.flares || st.cme);   // после проверки конца события (разбор Codex: иначе лишний кадр с t = 0)
+    const evOn = st.mode !== 'sn' && evActive && (st.flares || st.cme) && !noCorona();   // после проверки конца события (разбор Codex: иначе лишний кадр с t = 0)
     if (playing) { if (!evOn) simT += dtPh * st.speed; $('scrub').value = t; }
     $('scrubO').textContent = t.toFixed(1); $('scrub').max = cyc;
     const px = view.clientHeight / (2 * Math.tan(cam.fov * Math.PI / 360));
